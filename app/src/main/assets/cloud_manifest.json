@@ -1,6 +1,6 @@
 {
-  "version": "2026.10.18.1904",
-  "updatedAt": "2026/10/18 19:04",
+  "version": "2026.10.18.2352",
+  "updatedAt": "2026/10/18 23:52",
   "cameraCount": 1903,
   "intervalCameraCount": 67,
   "techLawCameraCount": 19,
@@ -8,7 +8,7 @@
   "closureCount": 279,
   "constructionCount": 218,
   "sha256Cameras": "3325f765f18a3d6f517c52d30ecff3042fe318757b2bd976410a6d1e45b8e23a",
-  "sha256Events": "2ac78935d6af82c1a08e9f423b66e1d78dc507ad1bb4d5f889412d673f3c7316",
+  "sha256Events": "2baf829d5e0cdf151576e4c1b3cd3e78dc96dc66ce95e61234dd5b4e9a0eddde",
   "files": {
     "camerasCsv": "taiwan_cameras_latest.csv",
     "camerasJson": "taiwan_cameras_latest.json",
