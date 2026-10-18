@@ -92,8 +92,7 @@ def run():
             "gh", "release", "create", f"v{vname}",
             str(dst1),
             "--title", f"神盾路況行車助手 v{vname}",
-            "--notes", f"神盾路況行車助手 v{vname} 最新版發布：\n- 更新全台測速照相與路況資料庫\n- 效能與穩定度最佳化",
-            "--clobber"
+            "--notes", f"神盾路況行車助手 v{vname} 最新版發布：\n- 更新全台測速照相與路況資料庫\n- 效能與穩定度最佳化"
         ]
         rel_res = subprocess.run(release_cmd, cwd=str(BASE_DIR))
         if rel_res.returncode == 0:
