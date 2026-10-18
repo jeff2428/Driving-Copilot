@@ -21,6 +21,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import tw.roadguard.aegis.ads.AdRevenueManager
 import tw.roadguard.aegis.data.TaiwanOpenDataRepository
 import tw.roadguard.aegis.model.*
@@ -516,6 +517,7 @@ class RoadGuardService : Service(), LocationListener {
 
     /**
      * 啟動系統級「神盾測速 + 施工封閉」二合一懸浮視窗 (直接浮在 Google Maps 上方)
+     * 特性：平時精簡膠囊型態，輕點主體立即展開「返回軟體」與「關閉程式」選單
      */
     @SuppressLint("ClickableViewAccessibility")
     fun showFloatingOverlay(): Boolean {
@@ -530,10 +532,16 @@ class RoadGuardService : Service(), LocationListener {
             ).toInt()
         }
 
+        // 外層垂直容器：包含主體膠囊 (mainPill) 與 點擊展開的按鈕列 (actionsBar)
         val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+
+        val mainPill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(8), dp(14), dp(8))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
             floatContainerBg = GradientDrawable().apply {
                 setColor(Color.parseColor("#EA0B132B"))
                 cornerRadius = dp(22).toFloat()
@@ -558,7 +566,7 @@ class RoadGuardService : Service(), LocationListener {
             }
         }
         floatSpeedLimitTv = limitTv
-        root.addView(limitTv)
+        mainPill.addView(limitTv)
 
         // 中間：目前 GPS 時速
         val speedCol = LinearLayout(this).apply {
@@ -582,7 +590,7 @@ class RoadGuardService : Service(), LocationListener {
         floatCurrentSpeedTv = speedValTv
         speedCol.addView(speedValTv)
         speedCol.addView(speedUnitTv)
-        root.addView(speedCol)
+        mainPill.addView(speedCol)
 
         // 右側：上排測速倒數 + 下排道路施工/封閉警示
         val infoCol = LinearLayout(this).apply {
@@ -605,17 +613,82 @@ class RoadGuardService : Service(), LocationListener {
         floatRoadAlertTv = roadTv
         infoCol.addView(camTv)
         infoCol.addView(roadTv)
-        root.addView(infoCol)
+        mainPill.addView(infoCol)
 
-        // 右側關閉/展開小按鈕
-        val closeBtn = TextView(this).apply {
-            text = " ✕ "
+        // 展開提示箭頭小圖示
+        val toggleHintTv = TextView(this).apply {
+            text = " ▾ "
             setTextColor(Color.parseColor("#94A3B8"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            setPadding(dp(8), dp(4), dp(2), dp(4))
-            setOnClickListener { hideFloatingOverlay() }
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(4), dp(2), dp(2), dp(2))
         }
-        root.addView(closeBtn)
+        mainPill.addView(toggleHintTv)
+        root.addView(mainPill)
+
+        // -------------------------------------------------------------
+        // 平時隱藏的功能按鈕列：點擊懸浮視窗後展開
+        // 包含：【📱 返回軟體】與【🛑 關閉程式】
+        // -------------------------------------------------------------
+        val actionsBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            visibility = View.GONE // 平時隱藏
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(6)
+            }
+            layoutParams = lp
+        }
+
+        val btnReturn = TextView(this).apply {
+            text = "📱 返回軟體"
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#EA1D4ED8")) // 質感深藍
+                cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), Color.parseColor("#60A5FA"))
+            }
+            setOnClickListener {
+                val openIntent = Intent(this@RoadGuardService, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                }
+                startActivity(openIntent)
+                actionsBar.visibility = View.GONE
+                toggleHintTv.text = " ▾ "
+            }
+        }
+        actionsBar.addView(btnReturn)
+
+        val btnClose = TextView(this).apply {
+            text = "🛑 關閉程式"
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#EAB91C1C")) // 警示深紅
+                cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), Color.parseColor("#F87171"))
+            }
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                leftMargin = dp(8)
+            }
+            layoutParams = lp
+            setOnClickListener {
+                exitAppCompletely()
+            }
+        }
+        actionsBar.addView(btnClose)
+        root.addView(actionsBar)
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -636,14 +709,22 @@ class RoadGuardService : Service(), LocationListener {
             y = dp(90)
         }
 
-        // 支援手指自由拖曳懸浮視窗，輕點則返回 App 主畫面
+        // 8 秒無動作自動收合按鈕列，避免駕駛時持續遮擋導航地圖
+        val autoCollapseRunnable = Runnable {
+            if (actionsBar.visibility == View.VISIBLE) {
+                actionsBar.visibility = View.GONE
+                toggleHintTv.text = " ▾ "
+            }
+        }
+
+        // 支援手指自由拖曳懸浮視窗；輕點主體則切換顯示/隱藏「返回軟體」與「關閉程式」按鈕
         var initialX = 0
         var initialY = 0
         var touchX = 0f
         var touchY = 0f
         var isMoved = false
 
-        root.setOnTouchListener { _, event ->
+        mainPill.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
@@ -666,10 +747,17 @@ class RoadGuardService : Service(), LocationListener {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!isMoved) {
-                        val openIntent = Intent(this, MainActivity::class.java).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        // 輕點主體：切換展開或收起
+                        if (actionsBar.visibility == View.VISIBLE) {
+                            actionsBar.visibility = View.GONE
+                            toggleHintTv.text = " ▾ "
+                            mainHandler.removeCallbacks(autoCollapseRunnable)
+                        } else {
+                            actionsBar.visibility = View.VISIBLE
+                            toggleHintTv.text = " ▴ "
+                            mainHandler.removeCallbacks(autoCollapseRunnable)
+                            mainHandler.postDelayed(autoCollapseRunnable, 8000L)
                         }
-                        startActivity(openIntent)
                     }
                     true
                 }
@@ -687,6 +775,39 @@ class RoadGuardService : Service(), LocationListener {
             e.printStackTrace()
             false
         }
+    }
+
+    /**
+     * 從懸浮視窗一鍵完全結束程式與後台常駐定位服務
+     */
+    fun exitAppCompletely() {
+        mainHandler.post {
+            Toast.makeText(this, "🛑 已完全關閉神盾行車助手", Toast.LENGTH_SHORT).show()
+        }
+        hideFloatingOverlay()
+        mainHandler.removeCallbacksAndMessages(null)
+        try {
+            locationManager?.removeUpdates(this)
+        } catch (_: Exception) {
+        }
+        voiceEngine.shutdown()
+        try {
+            val exitIntent = Intent(MainActivity.ACTION_EXIT_APP).apply {
+                setPackage(packageName)
+            }
+            sendBroadcast(exitIntent)
+        } catch (_: Exception) {
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        stopSelf()
+        mainHandler.postDelayed({
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }, 300L)
     }
 
     fun hideFloatingOverlay() {

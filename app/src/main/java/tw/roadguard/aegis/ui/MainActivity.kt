@@ -3,9 +3,11 @@ package tw.roadguard.aegis.ui
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -134,9 +136,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    companion object {
+        const val ACTION_EXIT_APP = "tw.roadguard.aegis.ACTION_EXIT_APP"
+    }
+
+    private val exitReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_EXIT_APP) {
+                finishAffinity()
+                kotlin.system.exitProcess(0)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val filter = IntentFilter(ACTION_EXIT_APP)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(exitReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(exitReceiver, filter)
+        }
         buildUi()
         startRadarService()
         requestPermissionsIfNeeded()
@@ -148,6 +169,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        try {
+            unregisterReceiver(exitReceiver)
+        } catch (_: Exception) {
+        }
         if (bound) {
             svc?.removeSnapshotListener(snapshotListener)
             unbindService(conn)
