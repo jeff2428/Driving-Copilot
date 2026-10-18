@@ -1,7 +1,7 @@
 {
-  "versionCode": 9,
-  "versionName": "2.0.7",
+  "versionCode": 10,
+  "versionName": "2.0.8",
   "forceUpdate": false,
   "apkDownloadUrl": "https://github.com/jeff2428/Driving-Copilot/releases/latest/download/TW-RoadGuard-Aegis.apk",
-  "releaseNotes": "版本 v2.0.7 更新：\n1. 更新最新全台測速照相與施工封閉資料庫\n2. 系統效能優化與穩定性提升"
+  "releaseNotes": "版本 v2.0.8 更新：\n1. 更新最新全台測速照相與施工封閉資料庫\n2. 系統效能優化與穩定性提升"
 }
