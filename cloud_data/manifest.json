@@ -1,0 +1,17 @@
+{
+  "version": "2026.10.17.2317",
+  "updatedAt": "2026/10/17 23:17",
+  "cameraCount": 1903,
+  "intervalCameraCount": 67,
+  "techLawCameraCount": 19,
+  "eventCount": 886,
+  "closureCount": 279,
+  "constructionCount": 218,
+  "sha256Cameras": "3325f765f18a3d6f517c52d30ecff3042fe318757b2bd976410a6d1e45b8e23a",
+  "sha256Events": "4d694317f41240c11b81e121342836ffe29e146f2f2e82313bf8db35ed846f71",
+  "files": {
+    "camerasCsv": "taiwan_cameras_latest.csv",
+    "camerasJson": "taiwan_cameras_latest.json",
+    "roadEventsJson": "taiwan_road_events_latest.json"
+  }
+}

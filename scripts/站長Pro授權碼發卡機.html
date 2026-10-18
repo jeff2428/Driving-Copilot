@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>👑 神盾路況行車助手 — 站長專屬 Pro 授權碼發卡機</title>
+<style>
+  * { box-sizing: border-box; font-family: "Microsoft JhengHei", system-ui, sans-serif; }
+  body {
+    margin: 0; padding: 32px 16px;
+    background: #0B1120; color: #F8FAFC;
+    display: flex; justify-content: center;
+  }
+  .card {
+    width: 100%; max-width: 580px;
+    background: #111827; border: 1px solid #1E293B;
+    border-radius: 20px; padding: 28px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+  }
+  h1 { margin: 0 0 8px; font-size: 22px; color: #FCD34D; }
+  p.sub { margin: 0 0 22px; font-size: 13.5px; color: #94A3B8; line-height: 1.5; }
+  label { display: block; font-size: 13.5px; font-weight: 700; color: #93C5FD; margin: 16px 0 8px; }
+  input, select {
+    width: 100%; padding: 13px 14px; font-size: 16px;
+    border-radius: 12px; border: 1px solid #334155;
+    background: #1E293B; color: #FFF; font-weight: 700;
+    letter-spacing: 1px;
+  }
+  .btn-row { display: flex; gap: 10px; margin-top: 18px; }
+  button {
+    flex: 1; padding: 14px; font-size: 15px; font-weight: 800;
+    border: none; border-radius: 12px; cursor: pointer;
+    transition: transform 0.1s, opacity 0.2s;
+  }
+  button:active { transform: scale(0.98); }
+  .btn-m { background: #2563EB; color: #FFF; }
+  .btn-y { background: #059669; color: #FFF; }
+  .btn-l { background: #D97706; color: #FFF; }
+  .result-box {
+    margin-top: 22px; padding: 18px;
+    background: #064E3B; border: 2px solid #10B981;
+    border-radius: 14px; text-align: center; display: none;
+  }
+  .key-text {
+    font-size: 22px; font-weight: 900; color: #6EE7B7;
+    letter-spacing: 1.5px; margin: 8px 0 12px; word-break: break-all;
+  }
+  .copy-btn {
+    background: #10B981; color: #052E16; padding: 10px 20px;
+    border-radius: 10px; font-size: 14px; font-weight: 800;
+  }
+  .note {
+    margin-top: 22px; padding: 14px; background: #1E293B;
+    border-radius: 12px; font-size: 12.5px; color: #CBD5E1; line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>👑 神盾路況行車助手 — 站長 Pro 發卡機</h1>
+  <p class="sub">
+    採用 HMAC-SHA256 硬體設備綁定演算法。客戶付款後，將他手機上的「專屬車機設備碼 (RG-XXXX-XXXX)」貼入下方，即可一鍵算出專屬開通碼（轉傳給其他手機無效）。
+  </p>
+
+  <label>1. 輸入客戶傳來的「專屬車機設備碼」：</label>
+  <input id="devCode" type="text" placeholder="例如：RG-8F3A-92C1" value="RG-" />
+
+  <label>2. 選擇客戶購買的授權方案（點擊即產生開通碼）：</label>
+  <div class="btn-row">
+    <button class="btn-m" onclick="generateKey(30, '月卡 (30天)')">📅 月卡 (30天)</button>
+    <button class="btn-y" onclick="generateKey(365, '年卡 (365天)')">⭐ 年卡 (365天)</button>
+    <button class="btn-l" onclick="generateKey(-1, '終身永久卡')">👑 終身永久卡</button>
+  </div>
+
+  <div id="resultBox" class="result-box">
+    <div id="planInfo" style="font-size:13px;color:#A7F3D0;"></div>
+    <div id="keyOutput" class="key-text"></div>
+    <button class="copy-btn" onclick="copyReply()">📋 一鍵複製「開通碼＋回覆客戶話術」</button>
+  </div>
+
+  <div class="note">
+    💡 <b>提示：您也可以在手機 App 內隨時發卡！</b><br>
+    在手機 App 打開「⚙️ 設定」→ 拉到最下方點擊「🔐 站長管理後台」（預設密碼：<code>888888</code>），即可直接使用手機隨身發卡機！
+  </div>
+</div>
+
+<script>
+const MASTER_SECRET = "TW_RoadGuard_Aegis_MasterSecret_2026_#JeffProKey";
+let lastReplyMsg = "";
+
+async function hmacSha256Hex8(message) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(MASTER_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  const bytes = Array.from(new Uint8Array(sig));
+  return bytes.map(b => b.toString(16).padStart(2, "0").toUpperCase()).join("").substring(0, 8);
+}
+
+function getExpiryYmd(days) {
+  if (days <= 0) return "99991231";
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}`;
+}
+
+async function generateKey(days, label) {
+  const rawDev = document.getElementById("devCode").value.trim().toUpperCase();
+  if (!rawDev.startsWith("RG-") || rawDev.length < 10) {
+    alert("請輸入完整的客戶設備碼（格式如：RG-8F3A-92C1）");
+    return;
+  }
+  const expiryYmd = getExpiryYmd(days);
+  const payload = `${rawDev}|${expiryYmd}`;
+  const sig = await hmacSha256Hex8(payload);
+  const fullKey = `PRO-${expiryYmd}-${sig}`;
+
+  const expText = expiryYmd === "99991231"
+    ? "永久有效"
+    : `${expiryYmd.substring(0,4)}/${expiryYmd.substring(4,6)}/${expiryYmd.substring(6,8)}`;
+
+  document.getElementById("planInfo").innerText = `設備：${rawDev} ｜ 方案：${label} ｜ 效期：${expText}`;
+  document.getElementById("keyOutput").innerText = fullKey;
+  document.getElementById("resultBox").style.display = "block";
+
+  lastReplyMsg = `感謝您的支持！🎉\n您的【神盾路況行車助手 Pro 尊享會員 (${label})】已為您核發：\n\n🔑 專屬開通碼：${fullKey}\n📱 綁定設備碼：${rawDev}\n📅 有效期限：${expText}\n\n請打開 App → 點擊底部「⚙️ 設定」→ 點擊「👑 升級 Pro 免看廣告」→ 貼上此開通碼點擊「立即驗證開通」即可解鎖！`;
+}
+
+function copyReply() {
+  navigator.clipboard.writeText(lastReplyMsg).then(() => {
+    alert("✅ 已複製完整開通訊息！可直接貼到 LINE / 訊息回覆給客戶。");
+  });
+}
+</script>
+</body>
+</html>

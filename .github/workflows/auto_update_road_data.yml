@@ -1,0 +1,40 @@
+name: Auto Update Taiwan Speed Cameras & Road Construction Data
+
+on:
+  schedule:
+    # 台灣時間每 6 小時自動執行一次 (00:15, 06:15, 12:15, 18:15 CST)
+    - cron: '15 */6 * * *'
+  workflow_dispatch: # 支援在 GitHub Actions 頁面手動一鍵觸發更新
+
+permissions:
+  contents: write
+
+jobs:
+  crawl-and-publish:
+    name: 爬取警政署測速與警廣施工開放資料並發布至 CDN
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Taiwan Open Data Crawler & Cleaner
+        run: python3 scripts/update_taiwan_road_data.py
+
+      - name: Commit & Push Updated Cloud Data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloud_data/ app/src/main/assets/taiwan_cameras_seed.csv app/src/main/assets/taiwan_road_events_seed.json app/src/main/assets/cloud_manifest.json
+          if git diff --staged --quiet; then
+            echo "圖資無變動，略過 Commit"
+          else
+            VERSION=$(python3 -c "import json; print(json.load(open('cloud_data/manifest.json'))['version'])")
+            git commit -m "chore(data): 自動更新全台測速照相與施工路況圖資 v${VERSION}"
+            git push
+          fi

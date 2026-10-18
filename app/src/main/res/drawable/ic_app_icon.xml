@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Dark background circle -->
+    <path
+        android:fillColor="#0B132B"
+        android:pathData="M0,0h108v108h-108z" />
+    <!-- Outer Aegis Shield -->
+    <path
+        android:fillColor="#1C2541"
+        android:strokeColor="#FF3B30"
+        android:strokeWidth="4"
+        android:pathData="M54,14 L88,28 L88,54 C88,76 73,90 54,96 C35,90 20,76 20,54 L20,28 Z" />
+    <!-- Red Speed Limit Ring -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#E63946"
+        android:strokeWidth="6"
+        android:pathData="M54,48 m-18,0 a18,18 0 1,0 36,0 a18,18 0 1,0 -36,0" />
+    <!-- Construction Warning Triangle Badge at bottom-right -->
+    <path
+        android:fillColor="#FF9F1C"
+        android:strokeColor="#0B132B"
+        android:strokeWidth="2"
+        android:pathData="M74,62 L92,90 L56,90 Z" />
+    <path
+        android:fillColor="#0B132B"
+        android:pathData="M72,71 h4 v9 h-4 z M72,83 h4 v4 h-4 z" />
+</vector>
