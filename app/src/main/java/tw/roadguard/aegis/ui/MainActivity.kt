@@ -183,7 +183,7 @@ class MainActivity : AppCompatActivity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (panel != Panel.NONE) openPanel(Panel.NONE) else confirmExitApp()
+        if (panel != Panel.NONE) openPanel(Panel.NONE) else @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     /**
@@ -427,9 +427,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun buildFabColumn(): View {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val fabExit = fab("⏻") { confirmExitApp() }.apply {
-            setTextColor(color("#EF4444"))
-        }
         fabNight = fab("🌙") { cycleMapMode() }
         fabVoice = fab("🔊") { toggleVoice() }
         fabRecenter = fab("◎") {
@@ -437,7 +434,10 @@ class MainActivity : AppCompatActivity() {
             if (mapReady) webView.evaluateJavascript("window.recenter();", null)
             styleRecenterFab()
         }
-        for ((i, v) in listOf(fabExit, fabNight, fabVoice, fabRecenter).withIndex()) {
+        val fabExit = fab("⏻") { confirmExitApp() }.apply {
+            setTextColor(color("#EF4444"))
+        }
+        for ((i, v) in listOf(fabNight, fabVoice, fabRecenter, fabExit).withIndex()) {
             col.addView(v, lp(dp(48), dp(48)).apply { if (i > 0) topMargin = dp(10) })
         }
         styleRecenterFab()
@@ -538,16 +538,6 @@ class MainActivity : AppCompatActivity() {
             nav.addView(item, lp(0, WRAP, 1f))
             p to item
         }
-        val exitItem = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(0, dp(6), 0, dp(6))
-            setOnClickListener { confirmExitApp() }
-        }
-        exitItem.addView(tv("🛑", 18f).apply { gravity = Gravity.CENTER })
-        exitItem.addView(tv("關閉", 12f, "#EF4444", true).apply { gravity = Gravity.CENTER })
-        nav.addView(exitItem, lp(0, WRAP, 1f))
-
         sheet.addView(nav, lp(MATCH, WRAP))
         return sheet
     }
@@ -1065,14 +1055,6 @@ class MainActivity : AppCompatActivity() {
             }
         })
         panelHost.addView(g3, lp(MATCH, WRAP).apply { bottomMargin = dp(12) })
-
-        val exitBtn = tv("🛑  完全關閉並退出神盾行車助手", 15f, "#FFFFFF", true).apply {
-            gravity = Gravity.CENTER
-            background = rounded(cRed, 14)
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            setOnClickListener { confirmExitApp() }
-        }
-        panelHost.addView(exitBtn, lp(MATCH, WRAP).apply { topMargin = dp(4); bottomMargin = dp(14) })
 
         panelHost.addView(tv(
             "資料來源：內政部警政署「測速執法設置點」、警察廣播電臺「即時路況」、內政部國土測繪中心「臺灣通用電子地圖」，依政府資料開放授權條款使用。提醒僅供參考，請依現場標誌與交通規則駕駛。",
