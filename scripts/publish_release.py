@@ -78,8 +78,9 @@ def run():
         commit_msg = f"發布新版本 v{vname} (Code: {vcode})"
         subprocess.run(["git", "commit", "-m", commit_msg], cwd=str(BASE_DIR), check=False)
         
-        # git push
-        print("  ➔ 正在推送原始碼與版本推播檔至 GitHub main 分支...")
+        # git pull --rebase & push
+        print("  ➔ 正在同步並推送版本推播檔至 GitHub main 分支...")
+        subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=str(BASE_DIR))
         push_res = subprocess.run(["git", "push", "-u", "origin", "main"], cwd=str(BASE_DIR))
         if push_res.returncode == 0:
             print("  ✅ 雲端版本資訊 (app_version.json) 已成功推送到 GitHub！")
