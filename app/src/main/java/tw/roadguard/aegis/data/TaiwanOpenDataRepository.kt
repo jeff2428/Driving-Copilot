@@ -698,15 +698,26 @@ class TaiwanOpenDataRepository(private val context: Context) {
     fun scanRouteCorridor(destinationQuery: String, originLat: Double, originLng: Double): RouteScanResult? {
         val resolvedDest = resolveTaiwanDestination(destinationQuery) ?: return null
         val (destName, destLat, destLng) = resolvedDest
+        return scanRouteCorridorDirect(destName, destLat, destLng, originLat, originLng)
+    }
 
+    fun scanRouteCorridorDirect(
+        destName: String,
+        destLat: Double,
+        destLng: Double,
+        originLat: Double,
+        originLng: Double
+    ): RouteScanResult {
         val routePoints = ArrayList<Pair<Double, Double>>()
         var distanceKm = GeoUtils.distanceMeters(originLat, originLng, destLat, destLng) / 1000.0
         var durationMin = ((distanceKm / 60.0) * 60).toInt().coerceAtLeast(3)
 
-        // 呼叫 OSRM 取得真實道路幾何座標
+        val navSteps = ArrayList<NavStep>()
+
+        // 呼叫 OSRM 取得真實道路幾何座標與詳細轉彎步進指示 (steps=true)
         try {
             val osrmUrl =
-                "https://router.project-osrm.org/route/v1/driving/$originLng,$originLat;$destLng,$destLat?overview=full&geometries=geojson"
+                "https://router.project-osrm.org/route/v1/driving/$originLng,$originLat;$destLng,$destLat?overview=full&geometries=geojson&steps=true"
             val conn = (URL(osrmUrl).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 8000
                 readTimeout = 8000
@@ -721,13 +732,60 @@ class TaiwanOpenDataRepository(private val context: Context) {
                     durationMin = (route0.optDouble("duration", durationMin * 60.0) / 60.0).toInt().coerceAtLeast(1)
                     val coords = route0.optJSONObject("geometry")?.optJSONArray("coordinates")
                     if (coords != null) {
-                        val step = (coords.length() / 120).coerceAtLeast(1)
+                        val step = (coords.length() / 240).coerceAtLeast(1)
                         for (i in 0 until coords.length() step step) {
                             val pt = coords.getJSONArray(i)
                             routePoints.add(Pair(pt.getDouble(1), pt.getDouble(0)))
                         }
                         val lastPt = coords.getJSONArray(coords.length() - 1)
                         routePoints.add(Pair(lastPt.getDouble(1), lastPt.getDouble(0)))
+                    }
+
+                    // 解析每一個轉彎動作 (steps)
+                    val legs = route0.optJSONArray("legs")
+                    if (legs != null && legs.length() > 0) {
+                        val stepsArr = legs.getJSONObject(0).optJSONArray("steps")
+                        if (stepsArr != null) {
+                            for (sIdx in 0 until stepsArr.length()) {
+                                val sObj = stepsArr.getJSONObject(sIdx)
+                                val sName = sObj.optString("name", "").trim()
+                                val sDist = sObj.optDouble("distance", 0.0)
+                                val sDuration = sObj.optDouble("duration", 0.0)
+                                val manObj = sObj.optJSONObject("maneuver")
+                                val manType = manObj?.optString("type", "turn") ?: "turn"
+                                val manMod = manObj?.optString("modifier", "straight") ?: "straight"
+                                val locArr = manObj?.optJSONArray("location")
+                                val manLng = locArr?.optDouble(0) ?: 0.0
+                                val manLat = locArr?.optDouble(1) ?: 0.0
+
+                                val (inst, icon) = parseManeuverToChinese(manType, manMod, sName, destName)
+
+                                val stepPts = ArrayList<Pair<Double, Double>>()
+                                val geomCoords = sObj.optJSONObject("geometry")?.optJSONArray("coordinates")
+                                if (geomCoords != null) {
+                                    for (g in 0 until geomCoords.length()) {
+                                        val p = geomCoords.getJSONArray(g)
+                                        stepPts.add(Pair(p.getDouble(1), p.getDouble(0)))
+                                    }
+                                }
+
+                                navSteps.add(
+                                    NavStep(
+                                        stepIndex = sIdx,
+                                        roadName = sName.ifBlank { if (sIdx == 0) "出發路段" else "接續道路" },
+                                        instruction = inst,
+                                        maneuverType = manType,
+                                        maneuverModifier = manMod,
+                                        maneuverIcon = icon,
+                                        distanceMeters = sDist,
+                                        durationSec = sDuration,
+                                        maneuverLat = manLat,
+                                        maneuverLng = manLng,
+                                        stepPoints = stepPts
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -746,6 +804,39 @@ class TaiwanOpenDataRepository(private val context: Context) {
                     )
                 )
             }
+        }
+
+        if (navSteps.isEmpty()) {
+            navSteps.add(
+                NavStep(
+                    stepIndex = 0,
+                    roadName = "出發路段",
+                    instruction = "出發，往 $destName 方向行駛",
+                    maneuverType = "depart",
+                    maneuverModifier = "straight",
+                    maneuverIcon = "⬆️",
+                    distanceMeters = distanceKm * 1000.0,
+                    durationSec = durationMin * 60.0,
+                    maneuverLat = originLat,
+                    maneuverLng = originLng,
+                    stepPoints = routePoints
+                )
+            )
+            navSteps.add(
+                NavStep(
+                    stepIndex = 1,
+                    roadName = destName,
+                    instruction = "抵達目的地：$destName",
+                    maneuverType = "arrive",
+                    maneuverModifier = "straight",
+                    maneuverIcon = "🏁",
+                    distanceMeters = 0.0,
+                    durationSec = 0.0,
+                    maneuverLat = destLat,
+                    maneuverLng = destLng,
+                    stepPoints = emptyList()
+                )
+            )
         }
 
         val closures = ArrayList<ScoredRoadEvent>()
@@ -781,7 +872,7 @@ class TaiwanOpenDataRepository(private val context: Context) {
         constructions.sortBy { it.distanceMeters }
         routeCameras.sortBy { it.distanceMeters }
 
-        // 若有封閉或嚴重施工點，計算一個垂直偏移約 1.2km 的繞道途經點供 Google Maps 避開該路段
+        // 若有封閉或嚴重施工點，計算一個垂直偏移約 1.2km 的繞道途經點供避開該路段
         val criticalEvent = closures.firstOrNull()?.event ?: constructions.firstOrNull()?.event
         val bypassWaypoint = if (criticalEvent != null) {
             val bearingRad = Math.toRadians(GeoUtils.bearingDeg(originLat, originLng, destLat, destLng) + 90.0)
@@ -791,6 +882,22 @@ class TaiwanOpenDataRepository(private val context: Context) {
                 criticalEvent.lng + sin(bearingRad) * offsetDeg
             )
         } else null
+
+        val navRoute = NavRoute(
+            destinationName = destName,
+            originLat = originLat,
+            originLng = originLng,
+            destLat = destLat,
+            destLng = destLng,
+            totalDistanceMeters = distanceKm * 1000.0,
+            totalDurationSec = durationMin * 60.0,
+            steps = navSteps,
+            routePoints = routePoints,
+            closuresOnRoute = closures,
+            constructionsOnRoute = constructions,
+            camerasOnRoute = routeCameras,
+            bypassWaypoint = bypassWaypoint
+        )
 
         return RouteScanResult(
             destinationName = destName,
@@ -805,8 +912,52 @@ class TaiwanOpenDataRepository(private val context: Context) {
             constructionsOnRoute = constructions,
             hazardsOnRoute = hazards,
             camerasOnRoute = routeCameras,
-            bypassWaypoint = bypassWaypoint
+            bypassWaypoint = bypassWaypoint,
+            navRoute = navRoute
         )
+    }
+
+    private fun parseManeuverToChinese(
+        type: String,
+        modifier: String,
+        roadName: String,
+        destName: String
+    ): Pair<String, String> {
+        val r = roadName.ifBlank { "前方道路" }
+        return when (type) {
+            "depart" -> Pair("出發，沿著 $r 前行", "⬆️")
+            "arrive" -> Pair("抵達目的地：$destName", "🏁")
+            "roundabout", "rotary" -> Pair("進入圓環，往 $r", "🔄")
+            "merge" -> Pair("匯入 $r", "↖️")
+            "on ramp" -> Pair("上匝道，進入 $r", "↗️")
+            "off ramp" -> Pair("下匝道，進入 $r", "↘️")
+            "fork" -> when {
+                modifier.contains("left") -> Pair("走左側岔路，進入 $r", "↖️")
+                modifier.contains("right") -> Pair("走右側岔路，進入 $r", "↗️")
+                else -> Pair("走岔路，進入 $r", "⬆️")
+            }
+            "turn" -> when (modifier) {
+                "sharp left" -> Pair("向左急轉，進入 $r", "⬅️")
+                "left" -> Pair("向左轉，進入 $r", "⬅️")
+                "slight left" -> Pair("靠左行駛，進入 $r", "↖️")
+                "sharp right" -> Pair("向右急轉，進入 $r", "➡️")
+                "right" -> Pair("向右轉，進入 $r", "➡️")
+                "slight right" -> Pair("靠右行駛，進入 $r", "↗️")
+                "uturn" -> Pair("請迴轉，進入 $r", "↩️")
+                else -> Pair("轉向進入 $r", "⬆️")
+            }
+            "new name" -> Pair("直行，接續 $r", "⬆️")
+            "end of road" -> when {
+                modifier.contains("left") -> Pair("路底左轉，進入 $r", "⬅️")
+                modifier.contains("right") -> Pair("路底右轉，進入 $r", "➡️")
+                else -> Pair("路底轉向，進入 $r", "⬆️")
+            }
+            else -> when {
+                modifier.contains("left") -> Pair("向左轉，進入 $r", "⬅️")
+                modifier.contains("right") -> Pair("向右轉，進入 $r", "➡️")
+                else -> Pair("沿 $r 繼續行駛", "⬆️")
+            }
+        }
     }
 
     private fun minDistanceToPolylineMeters(lat: Double, lng: Double, pts: List<Pair<Double, Double>>): Double {
@@ -830,6 +981,15 @@ class TaiwanOpenDataRepository(private val context: Context) {
     private fun resolveTaiwanDestination(query: String): Triple<String, Double, Double>? {
         val q = query.trim()
         if (q.isEmpty()) return null
+
+        val parts = q.split(",", "，")
+        if (parts.size == 2) {
+            val lat = parts[0].trim().toDoubleOrNull()
+            val lng = parts[1].trim().toDoubleOrNull()
+            if (lat != null && lng != null && lat in 20.0..27.0 && lng in 118.0..124.0) {
+                return Triple("座標目的地", lat, lng)
+            }
+        }
 
         // 內建台灣熱門地標與常施工幹道快速解析庫（秒回且免網路延遲）
         val presets = mapOf(

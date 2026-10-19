@@ -68,6 +68,57 @@ data class ScoredRoadEvent(
     val relativeAngleDeg: Double
 )
 
+data class NavStep(
+    val stepIndex: Int,
+    val roadName: String,
+    val instruction: String,
+    val maneuverType: String,
+    val maneuverModifier: String,
+    val maneuverIcon: String,
+    val distanceMeters: Double,
+    val durationSec: Double,
+    val maneuverLat: Double,
+    val maneuverLng: Double,
+    val stepPoints: List<Pair<Double, Double>> = emptyList()
+)
+
+data class NavRoute(
+    val destinationName: String,
+    val originLat: Double,
+    val originLng: Double,
+    val destLat: Double,
+    val destLng: Double,
+    val totalDistanceMeters: Double,
+    val totalDurationSec: Double,
+    val steps: List<NavStep>,
+    val routePoints: List<Pair<Double, Double>>,
+    val closuresOnRoute: List<ScoredRoadEvent> = emptyList(),
+    val constructionsOnRoute: List<ScoredRoadEvent> = emptyList(),
+    val camerasOnRoute: List<ScoredCamera> = emptyList(),
+    val bypassWaypoint: Pair<Double, Double>? = null
+)
+
+data class NavState(
+    val isNavigating: Boolean = false,
+    val destinationName: String = "",
+    val currentStepIndex: Int = 0,
+    val currentStep: NavStep? = null,
+    val nextStep: NavStep? = null,
+    val distanceToTurnMeters: Double = 0.0,
+    val distanceToNextTurnMeters: Double = 0.0,
+    val remainingDistanceMeters: Double = 0.0,
+    val remainingDistMeters: Double = 0.0,
+    val remainingDurationSec: Double = 0.0,
+    val remainingTimeSec: Double = 0.0,
+    val isOffRoute: Boolean = false,
+    val currentRoadName: String = "",
+    val roadName: String = "",
+    val maneuverIcon: String = "⬆️",
+    val instruction: String = "",
+    val nextHint: String = "",
+    val etaFormatted: String = "--:--"
+)
+
 data class RouteScanResult(
     val destinationName: String,
     val originLat: Double,
@@ -81,12 +132,13 @@ data class RouteScanResult(
     val constructionsOnRoute: List<ScoredRoadEvent>,
     val hazardsOnRoute: List<ScoredRoadEvent>,
     val camerasOnRoute: List<ScoredCamera>,
-    val bypassWaypoint: Pair<Double, Double>?
+    val bypassWaypoint: Pair<Double, Double>?,
+    val navRoute: NavRoute? = null
 )
 
 data class RadarSnapshot(
-    val lat: Double = 24.1631,
-    val lng: Double = 120.6403,
+    val lat: Double = 24.1605,
+    val lng: Double = 120.6311,
     val speedKmh: Int = 0,
     val bearingDeg: Float = 0f,
     val bearingLabel: String = "北",
@@ -102,7 +154,8 @@ data class RadarSnapshot(
     val nearbyCameras: List<ScoredCamera> = emptyList(),
     val lastUpdatedTime: String = "--:--",
     val totalCamerasCount: Int = 0,
-    val totalActiveEventsCount: Int = 0
+    val totalActiveEventsCount: Int = 0,
+    val navState: NavState? = null
 )
 
 object GeoUtils {

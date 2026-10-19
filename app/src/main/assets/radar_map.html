@@ -123,10 +123,9 @@
     }
 
     if (follow) {
-      // 依車速自動縮放：高速看遠、市區看近
-      var band = p.speed >= 80 ? 0 : (p.speed >= 40 ? 1 : 2);
-      var z = [14, 15, 16][band];
-      if (band !== lastZoomSpeedBand) { lastZoomSpeedBand = band; map.setView(ll, z, { animate:true }); }
+      // 導航模式下鎖定車輛近距視角，一般巡航依車速自動縮放
+      var z = isNavigatingMode ? (p.speed >= 75 ? 16 : 17) : ([14, 15, 16][p.speed >= 80 ? 0 : (p.speed >= 40 ? 1 : 2)]);
+      if (z !== lastZoomSpeedBand) { lastZoomSpeedBand = z; map.setView(ll, z, { animate:true }); }
       else map.panTo(ll, { animate:true, duration:0.8 });
     }
 
@@ -157,16 +156,58 @@
       function (e) { return e.id; });
   };
 
+  var destMarker = null;
+  var isNavigatingMode = false;
+
   window.drawScannedRoute = function (r) {
     init(); if (!map) return;
     if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
     if (!r || !r.points || r.points.length < 2) return;
-    routeLine = L.polyline(r.points, { color:'#2563EB', weight:6, opacity:.85 }).addTo(map);
+    routeLine = L.polyline(r.points, { color:'#2563EB', weight:7, opacity:.9 }).addTo(map);
+    if (r.destLat && r.destLng) {
+      destMarker = L.marker([r.destLat, r.destLng], {
+        icon: L.divIcon({
+          className: '',
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+          html: '<div style="font-size:26px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">🏁</div>'
+        })
+      }).addTo(map);
+    }
     follow = false; notify('onFollowChanged', false);
     map.fitBounds(routeLine.getBounds(), { paddingTopLeft:[30, 140], paddingBottomRight:[30, 260] });
   };
 
-  window.clearRoute = function () { if (routeLine) { map.removeLayer(routeLine); routeLine = null; } };
+  window.setNavigatingMode = function (active, destLat, destLng) {
+    init(); if (!map) return;
+    isNavigatingMode = !!active;
+    if (isNavigatingMode) {
+      follow = true;
+      notify('onFollowChanged', true);
+      if (meMarker) {
+        map.setView(meMarker.getLatLng(), 17, { animate: true });
+      }
+      if (destLat && destLng && !destMarker) {
+        destMarker = L.marker([destLat, destLng], {
+          icon: L.divIcon({
+            className: '',
+            iconSize: [32, 32],
+            iconAnchor: [16, 32],
+            html: '<div style="font-size:26px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">🏁</div>'
+          })
+        }).addTo(map);
+      }
+    } else {
+      if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+    }
+  };
+
+  window.clearRoute = function () {
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+    isNavigatingMode = false;
+  };
 
   init();
 </script>

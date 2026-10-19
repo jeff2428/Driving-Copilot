@@ -115,6 +115,16 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         }, 280L)
     }
 
+    fun speakNavigation(text: String) {
+        if (!isVoiceEnabled) return
+        requestDuckingFocus()
+        if (isTtsReady) {
+            tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "NAV-${System.currentTimeMillis()}")
+        } else {
+            abandonAudioFocus()
+        }
+    }
+
     /**
      * 神盾測速照相兩階段語音預警
      */

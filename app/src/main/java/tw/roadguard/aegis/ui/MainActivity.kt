@@ -103,6 +103,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var panelScroll: ScrollView
     private lateinit var panelHost: LinearLayout
     private lateinit var navItems: List<Pair<Panel, LinearLayout>>
+    private lateinit var navBanner: LinearLayout
+    private lateinit var navManeuverIcon: TextView
+    private lateinit var navTurnDist: TextView
+    private lateinit var navInstruction: TextView
+    private lateinit var navNextInstruction: TextView
+    private lateinit var navEtaTv: TextView
+    private lateinit var startDrivingBtn: TextView
 
     // 面板內動態區塊
     private var nearbyListHost: LinearLayout? = null
@@ -362,6 +369,64 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(10), dp(12), 0)
         }
 
+        // 內建即時導航 HUD 頂部看板
+        navBanner = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded("#F00A192F", 18, "#38BDF8", 2)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            visibility = View.GONE
+            elevation = dp(8).toFloat()
+        }
+
+        val topRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        navManeuverIcon = tv("⬆️", 32f, "#38BDF8", true).apply {
+            gravity = Gravity.CENTER
+        }
+        topRow.addView(navManeuverIcon, lp(dp(50), dp(50)))
+
+        val midCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), 0, dp(6), 0)
+        }
+        navTurnDist = tv("0 公尺", 22f, cText, true)
+        navInstruction = tv("導航指引中...", 15f, "#38BDF8", true).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        navNextInstruction = tv("", 12f, cSub).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            visibility = View.GONE
+        }
+        midCol.addView(navTurnDist)
+        midCol.addView(navInstruction)
+        midCol.addView(navNextInstruction)
+        topRow.addView(midCol, lp(0, WRAP, 1f))
+
+        val navStopBtn = tv("結束", 13f, "#EF4444", true).apply {
+            gravity = Gravity.CENTER
+            background = rounded("#2D1515", 14, "#EF4444", 1)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setOnClickListener { stopInAppNavigation() }
+        }
+        topRow.addView(navStopBtn, lp(WRAP, WRAP))
+        navBanner.addView(topRow, lp(MATCH, WRAP))
+
+        val bottomNavRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, 0)
+        }
+        navEtaTv = tv("剩餘 -- 公里・約 -- 分鐘", 12f, "#94A3B8", true)
+        bottomNavRow.addView(navEtaTv, lp(0, WRAP, 1f))
+        navBanner.addView(bottomNavRow, lp(MATCH, WRAP))
+
+        wrap.addView(navBanner, lp(MATCH, WRAP).apply { bottomMargin = dp(8) })
+
         simPill = tv("🛣️ 模擬試駕中・點此停止", 12f, "#1F1300", true).apply {
             background = rounded("#FDE047", 14)
             setPadding(dp(12), dp(6), dp(12), dp(6))
@@ -509,12 +574,12 @@ class MainActivity : AppCompatActivity() {
         }
         sheet.addView(search, lp(MATCH, WRAP))
 
-        val start = tv("▶  開始行車　懸浮提醒＋Google Maps", 16f, "#FFFFFF", true).apply {
+        startDrivingBtn = tv("▶  開始行車　懸浮提醒＋Google Maps", 16f, "#FFFFFF", true).apply {
             gravity = Gravity.CENTER
             background = rounded(cBlue, 14)
             setOnClickListener { startDriving() }
         }
-        sheet.addView(start, lp(MATCH, dp(54)).apply { topMargin = dp(10) })
+        sheet.addView(startDrivingBtn, lp(MATCH, dp(54)).apply { topMargin = dp(10) })
 
         val nav = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -788,7 +853,12 @@ class MainActivity : AppCompatActivity() {
         if (mapReady) {
             val pts = JSONArray()
             res.routePoints.forEach { pts.put(JSONArray().put(it.first).put(it.second)) }
-            webView.evaluateJavascript("window.drawScannedRoute(${JSONObject().put("points", pts)});", null)
+            val obj = JSONObject().apply {
+                put("points", pts)
+                put("destLat", res.destLat)
+                put("destLng", res.destLng)
+            }
+            webView.evaluateJavascript("window.drawScannedRoute($obj);", null)
         }
 
         host.addView(tv("${res.destinationName}", 16f, cText, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
@@ -808,9 +878,18 @@ class MainActivity : AppCompatActivity() {
         }
         host.addView(tv(verdict.first, 13f, verdict.second, true).apply { setPadding(0, dp(10), 0, dp(10)) })
 
+        val navRoute = res.navRoute
+        if (navRoute != null) {
+            host.addView(tv("🚀  開始軟體內建導航 (免依賴Google)", 15f, "#FFFFFF", true).apply {
+                gravity = Gravity.CENTER
+                background = rounded(cBlue, 12)
+                setOnClickListener { startInAppNavigation(navRoute) }
+            }, lp(MATCH, dp(48)).apply { bottomMargin = dp(8) })
+        }
+
         val wp = res.bypassWaypoint
         if (wp != null) {
-            host.addView(tv("避開封閉，繞道導航", 15f, "#FFFFFF", true).apply {
+            host.addView(tv("避開封閉，繞道 Google Maps 導航", 14f, "#FFFFFF", true).apply {
                 gravity = Gravity.CENTER
                 background = rounded(cRed, 12)
                 setOnClickListener {
@@ -819,16 +898,40 @@ class MainActivity : AppCompatActivity() {
                                 "&destination=${res.destLat},${res.destLng}&waypoints=${wp.first},${wp.second}&travelmode=driving"
                     )
                 }
-            }, lp(MATCH, dp(48)).apply { bottomMargin = dp(8) })
+            }, lp(MATCH, dp(44)).apply { bottomMargin = dp(8) })
         }
-        host.addView(tv(if (wp != null) "照原路線導航" else "開始導航", 15f, "#FFFFFF", true).apply {
+        host.addView(tv("開啟 Google Maps 導航 (搭配神盾懸浮窗)", 14f, cSub, true).apply {
             gravity = Gravity.CENTER
-            background = if (wp != null) rounded(cField, 12, cLine) else rounded(cBlue, 12)
+            background = rounded(cField, 12, cLine)
             setOnClickListener { launchWithOverlay("google.navigation:q=${res.destLat},${res.destLng}&mode=d") }
-        }, lp(MATCH, dp(48)).apply { bottomMargin = dp(12) })
+        }, lp(MATCH, dp(44)).apply { bottomMargin = dp(12) })
 
         (res.closuresOnRoute + res.constructionsOnRoute + res.hazardsOnRoute).take(10).forEach { host.addView(eventRow(it)) }
         res.camerasOnRoute.take(8).forEach { host.addView(cameraRow(it)) }
+    }
+
+    private fun startInAppNavigation(navRoute: NavRoute) {
+        openPanel(Panel.NONE)
+        svc?.startNavigation(navRoute)
+        if (mapReady) {
+            val pts = JSONArray()
+            navRoute.routePoints.forEach { pts.put(JSONArray().put(it.first).put(it.second)) }
+            val obj = JSONObject().apply {
+                put("points", pts)
+                put("destLat", navRoute.destLat)
+                put("destLng", navRoute.destLng)
+            }
+            webView.evaluateJavascript("window.drawScannedRoute($obj);", null)
+            webView.evaluateJavascript("window.setNavigatingMode(true, ${navRoute.destLat}, ${navRoute.destLng});", null)
+        }
+    }
+
+    private fun stopInAppNavigation() {
+        svc?.stopNavigation()
+        if (mapReady) {
+            webView.evaluateJavascript("window.setNavigatingMode(false, 0, 0);", null)
+            webView.evaluateJavascript("window.clearRoute();", null)
+        }
     }
 
     // ---- 回報 ----
@@ -1194,6 +1297,33 @@ class MainActivity : AppCompatActivity() {
 
         simPill.visibility = if (s.isSimulating) View.VISIBLE else View.GONE
 
+        // 導航 HUD 與狀態
+        val nav = s.navState
+        if (nav != null && nav.isNavigating) {
+            navBanner.visibility = View.VISIBLE
+            navManeuverIcon.text = nav.maneuverIcon
+            navTurnDist.text = fmtDist(nav.distanceToNextTurnMeters)
+            navInstruction.text = nav.instruction
+            val next = nav.nextStep
+            if (next != null) {
+                navNextInstruction.visibility = View.VISIBLE
+                navNextInstruction.text = "接著：${next.maneuverIcon} ${next.instruction}"
+            } else {
+                navNextInstruction.visibility = View.GONE
+            }
+            val remKm = String.format(Locale.TAIWAN, "%.1f", nav.remainingDistanceMeters / 1000.0)
+            val remMin = (nav.remainingDurationSec / 60.0).roundToInt().coerceAtLeast(1)
+            navEtaTv.text = "往 ${nav.destinationName}・剩餘 $remKm 公里・約 $remMin 分鐘"
+            startDrivingBtn.text = "🛑  結束導航 (${nav.destinationName})"
+            startDrivingBtn.background = rounded("#DC2626", 14)
+            startDrivingBtn.setOnClickListener { stopInAppNavigation() }
+        } else {
+            navBanner.visibility = View.GONE
+            startDrivingBtn.text = "▶  開始行車　懸浮提醒＋Google Maps"
+            startDrivingBtn.background = rounded(cBlue, 14)
+            startDrivingBtn.setOnClickListener { startDriving() }
+        }
+
         renderAlert(s)
 
         val now = System.currentTimeMillis()
@@ -1216,6 +1346,10 @@ class MainActivity : AppCompatActivity() {
 
         if (cam == null && ev == null) {
             alertCard.visibility = View.GONE
+            if (s.navState?.isNavigating == true) {
+                idleChip.visibility = View.GONE
+                return
+            }
             idleChip.visibility = View.VISIBLE
             val isPro = svc?.adManager?.isProMember == true
             idleChip.text = if (isPro) {
@@ -1304,6 +1438,7 @@ class MainActivity : AppCompatActivity() {
             val p = JSONObject().apply {
                 put("lat", s.lat); put("lng", s.lng); put("bearing", s.bearingDeg.toDouble()); put("speed", s.speedKmh)
                 put("cameras", cams); put("events", evs)
+                put("isNavigating", s.navState?.isNavigating == true)
             }
             webView.evaluateJavascript("window.updateRadarMap($p);", null)
         } catch (_: Exception) {
@@ -1345,8 +1480,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun startDriving() {
         val scan = lastScan
-        if (scan != null) {
-            launchWithOverlay("google.navigation:q=${scan.destLat},${scan.destLng}&mode=d")
+        val route = scan?.navRoute
+        if (route != null) {
+            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("選擇導航模式")
+                .setMessage("目的地：${scan.destinationName}\n約 ${String.format(Locale.TAIWAN, "%.1f", scan.distanceKm)} 公里・${scan.durationMin} 分鐘")
+                .setPositiveButton("🚀 軟體內建即時導航") { _, _ ->
+                    startInAppNavigation(route)
+                }
+                .setNeutralButton("🗺️ Google Maps + 懸浮窗") { _, _ ->
+                    launchWithOverlay("google.navigation:q=${scan.destLat},${scan.destLng}&mode=d")
+                }
+                .setNegativeButton("取消", null)
+                .show()
         } else {
             launchWithOverlay(null)
         }

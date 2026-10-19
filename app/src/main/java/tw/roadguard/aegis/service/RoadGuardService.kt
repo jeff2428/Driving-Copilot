@@ -44,6 +44,8 @@ class RoadGuardService : Service(), LocationListener {
         private set
     lateinit var adManager: AdRevenueManager
         private set
+    lateinit var navEngine: NavigationEngine
+        private set
 
     private var locationManager: LocationManager? = null
     private var windowManager: WindowManager? = null
@@ -112,6 +114,9 @@ class RoadGuardService : Service(), LocationListener {
         super.onCreate()
         repository = TaiwanOpenDataRepository(this)
         voiceEngine = VoiceAlertEngine(this)
+        navEngine = NavigationEngine(repository, voiceEngine).apply {
+            onNavStateListener = { recomputeRadarState() }
+        }
         adManager = AdRevenueManager(this)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -226,6 +231,7 @@ class RoadGuardService : Service(), LocationListener {
         } else {
             currentBearingDeg
         }
+        navEngine.updateLocation(currentLat, currentLng, currentSpeedKmh.toDouble(), currentBearingDeg.toDouble())
         recomputeRadarState()
     }
 
@@ -370,6 +376,8 @@ class RoadGuardService : Service(), LocationListener {
         val deltaDeg = 0.00020
         currentLat += cos(rad) * deltaDeg
         currentLng += sin(rad) * deltaDeg
+
+        navEngine.updateLocation(currentLat, currentLng, currentSpeedKmh.toDouble(), currentBearingDeg.toDouble())
 
         // 模擬接近測速桿後自動微調車速
         if (simStep in 18..28) {
@@ -522,7 +530,8 @@ class RoadGuardService : Service(), LocationListener {
             nearbyCameras = candidateCameras.take(25),
             lastUpdatedTime = repository.lastSyncTimeStr,
             totalCamerasCount = repository.cameras.size,
-            totalActiveEventsCount = activeTotal
+            totalActiveEventsCount = activeTotal,
+            navState = navEngine.currentNavState
         )
         latestSnapshot = snapshot
         updateFloatingOverlayUi(snapshot)
@@ -837,23 +846,49 @@ class RoadGuardService : Service(), LocationListener {
 
     fun isFloatingOverlayShowing(): Boolean = floatingRootView != null
 
+    fun startNavigation(route: tw.roadguard.aegis.model.NavRoute) {
+        navEngine.startNavigation(route)
+        recomputeRadarState()
+    }
+
+    fun stopNavigation(reachDestination: Boolean = false) {
+        navEngine.stopNavigation(reachDestination)
+        recomputeRadarState()
+    }
+
     private fun updateFloatingOverlayUi(snap: RadarSnapshot) {
         if (floatingRootView == null) return
         mainHandler.post {
             floatCurrentSpeedTv?.text = "${snap.speedKmh}"
+
+            val nav = snap.navState
+            val isNav = nav != null && nav.isNavigating
+
             val cam = snap.nearestCamera
-            if (cam != null) {
+            if (cam != null && (cam.distanceMeters <= 500.0 || !isNav)) {
                 floatSpeedLimitTv?.text = "${cam.camera.speedLimit}"
                 val icon = if (cam.camera.type == CameraType.HOTSPOT) "🚨" else "📸"
                 floatCameraTitleTv?.text =
                     "$icon ${cam.distanceMeters.roundToInt()}m | ${cam.camera.type.label}"
+            } else if (nav != null && nav.isNavigating) {
+                floatSpeedLimitTv?.text = if (cam != null) "${cam.camera.speedLimit}" else "--"
+                val distKmStr = String.format("%.1f", nav.remainingDistanceMeters / 1000.0)
+                floatCameraTitleTv?.text = "🧭 ${nav.currentRoadName} (${distKmStr}km)"
             } else {
                 floatSpeedLimitTv?.text = "--"
                 floatCameraTitleTv?.text = "📸 前方無測速 (${snap.bearingLabel})"
             }
 
             val ev = snap.nearestRoadEvent
-            if (ev != null) {
+            if (nav != null && nav.isNavigating) {
+                val turnDist = if (nav.distanceToNextTurnMeters >= 1000) {
+                    String.format("%.1fkm", nav.distanceToNextTurnMeters / 1000.0)
+                } else {
+                    "${nav.distanceToNextTurnMeters.roundToInt()}m"
+                }
+                floatRoadAlertTv?.text = "${nav.maneuverIcon} $turnDist ${nav.instruction.take(12)}"
+                floatRoadAlertTv?.setTextColor(Color.parseColor("#38BDF8"))
+            } else if (ev != null) {
                 val distLabel = if (ev.distanceMeters >= 1000) {
                     String.format("%.1fkm", ev.distanceMeters / 1000.0)
                 } else {

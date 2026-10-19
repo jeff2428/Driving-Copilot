@@ -1,7 +1,7 @@
 {
-  "versionCode": 13,
-  "versionName": "2.0.11",
+  "versionCode": 14,
+  "versionName": "2.0.12",
   "forceUpdate": false,
   "apkDownloadUrl": "https://github.com/jeff2428/Driving-Copilot/releases/latest/download/TW-RoadGuard-Aegis.apk",
-  "releaseNotes": "版本 v2.0.11 更新：\n1. 全新加入「經常出沒移動式測速取締熱點」一體化同步預警功能（國1、國3、國5、台61西濱、北宜公路等 72 處熱點）\n2. 圖資一體化：更新圖資時，固定桿＋區間＋經常出沒點＋即時路況一次全同步\n3. 懸浮視窗與地圖橘色高對比標記、設定頁新增「提醒經常出沒點」開關"
+  "releaseNotes": "版本 v2.0.12 更新：\n1. 更新最新全台測速照相與施工封閉資料庫\n2. 系統效能優化與穩定性提升"
 }
