@@ -1311,6 +1311,10 @@ class MainActivity : AppCompatActivity() {
         g1.addView(switchRow("通過測速後「叮咚」", "提醒你已經通過測速點", s?.voiceEngine?.isPassChimeEnabled ?: true) {
             svc?.voiceEngine?.isPassChimeEnabled = it
         })
+        g1.addView(divider(), lp(MATCH, 1))
+        g1.addView(switchRow("懸浮窗支援貼邊收折", "推至螢幕左/右邊界自動收折隱藏，測速與危險時自動彈出", s?.isEdgeDockingEnabled ?: true) {
+            svc?.isEdgeDockingEnabled = it
+        })
         panelHost.addView(g1, lp(MATCH, WRAP).apply { bottomMargin = dp(12) })
 
         val g2 = settingsGroup()

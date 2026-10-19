@@ -70,7 +70,7 @@ def bump_version(custom_name: str = None):
 
     ver_obj["versionCode"] = new_code
     ver_obj["versionName"] = new_name
-    ver_obj["releaseNotes"] = f"版本 v{new_name} 更新：\n1. 升級五層 Google 地圖同級搜尋引擎 (支援全台分店、量販、地標與門牌號碼)\n2. 整合 Android 系統原生 Google Geocoder 與 Photon 空間加權引擎\n3. 實作台灣門牌號碼智慧分解器，遇冷門門牌自動降級定位\n4. 新增「最近搜尋歷史記錄」功能\n5. 設定面板提供自訂 Google Places API Key 選填"
+    ver_obj["releaseNotes"] = f"版本 v{new_name} 更新：\n1. 支援懸浮視窗自由拖曳至螢幕邊界外（防遮擋導航地圖）\n2. 智慧貼邊收折功能：靠邊自動收成側邊箭頭/速限圓形小標籤\n3. 輕點邊界標籤秒速彈出恢復完整視窗\n4. 危險緊急狀況自動彈出：收折狀態下遇超速、前方500m測速或道路封閉自動滑出展開，安全通過後自動收回\n5. 設定頁面新增「懸浮窗支援貼邊收折」開關與邊界防丟失安全保護"
     ver_obj.setdefault("forceUpdate", False)
 
     JSON_FILE.parent.mkdir(parents=True, exist_ok=True)

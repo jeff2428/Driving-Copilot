@@ -1,5 +1,8 @@
 package tw.roadguard.aegis.service
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.*
 import android.content.Context
@@ -19,6 +22,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -58,6 +62,120 @@ class RoadGuardService : Service(), LocationListener {
     private var floatCameraTitleTv: TextView? = null
     private var floatRoadAlertTv: TextView? = null
     private var floatContainerBg: GradientDrawable? = null
+    private var floatToggleHintTv: TextView? = null
+    private var actionsBarView: View? = null
+    private var overlayAnimator: ValueAnimator? = null
+
+    enum class DockSide {
+        NONE,
+        LEFT,
+        RIGHT
+    }
+
+    var dockState: DockSide = DockSide.NONE
+        private set
+
+    var autoExpandedForAlert: Boolean = false
+        private set
+
+    private val servicePrefs by lazy {
+        getSharedPreferences("roadguard_service_prefs", Context.MODE_PRIVATE)
+    }
+
+    var isEdgeDockingEnabled: Boolean
+        get() = servicePrefs.getBoolean("edge_docking_enabled", true)
+        set(value) {
+            servicePrefs.edit().putBoolean("edge_docking_enabled", value).apply()
+            if (!value && dockState != DockSide.NONE) {
+                restoreFloatingOverlayFromDock()
+            }
+        }
+
+    fun getOverlayWidth(): Int {
+        val root = floatingRootView ?: return 0
+        if (root.width > 0) return root.width
+        val dm = resources.displayMetrics
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(dm.widthPixels, View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(dm.heightPixels, View.MeasureSpec.AT_MOST)
+        )
+        return if (root.measuredWidth > 0) root.measuredWidth else (dm.density * 260).toInt()
+    }
+
+    fun animateOverlayX(targetX: Int, durationMs: Long = 240L, onEnd: (() -> Unit)? = null) {
+        val params = floatingParams ?: return
+        val root = floatingRootView ?: return
+        overlayAnimator?.cancel()
+        if (params.x == targetX) {
+            onEnd?.invoke()
+            return
+        }
+        val anim = ValueAnimator.ofInt(params.x, targetX).apply {
+            duration = durationMs
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { va ->
+                params.x = va.animatedValue as Int
+                try {
+                    windowManager?.updateViewLayout(root, params)
+                } catch (_: Exception) {}
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    onEnd?.invoke()
+                }
+            })
+        }
+        overlayAnimator = anim
+        anim.start()
+    }
+
+    fun dockFloatingOverlay(side: DockSide) {
+        val root = floatingRootView ?: return
+        val dm = resources.displayMetrics
+        val minHandle = (46 * dm.density).toInt()
+        val measuredW = getOverlayWidth()
+
+        actionsBarView?.visibility = View.GONE
+        dockState = side
+        autoExpandedForAlert = false
+        root.alpha = 0.85f
+
+        when (side) {
+            DockSide.LEFT -> {
+                floatToggleHintTv?.text = " ▶ "
+                val targetX = -(measuredW - minHandle)
+                animateOverlayX(targetX)
+            }
+            DockSide.RIGHT -> {
+                floatToggleHintTv?.text = " ◀ "
+                val targetX = dm.widthPixels - minHandle
+                animateOverlayX(targetX)
+            }
+            DockSide.NONE -> {
+                restoreFloatingOverlayFromDock()
+            }
+        }
+    }
+
+    fun restoreFloatingOverlayFromDock() {
+        val root = floatingRootView ?: return
+        val dm = resources.displayMetrics
+        val prevSide = dockState
+        dockState = DockSide.NONE
+        autoExpandedForAlert = false
+        root.alpha = 1.0f
+        floatToggleHintTv?.text = " ▾ "
+        actionsBarView?.visibility = View.GONE
+
+        val measuredW = getOverlayWidth()
+        val margin16 = (16 * dm.density).toInt()
+        val targetX = if (prevSide == DockSide.LEFT) {
+            margin16
+        } else {
+            (dm.widthPixels - measuredW - margin16).coerceAtLeast(margin16)
+        }
+        animateOverlayX(targetX)
+    }
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArraySet<(RadarSnapshot) -> Unit>()
@@ -657,6 +775,7 @@ class RoadGuardService : Service(), LocationListener {
             typeface = Typeface.DEFAULT_BOLD
             setPadding(dp(4), dp(2), dp(2), dp(2))
         }
+        floatToggleHintTv = toggleHintTv
         mainPill.addView(toggleHintTv)
         root.addView(mainPill)
 
@@ -676,6 +795,7 @@ class RoadGuardService : Service(), LocationListener {
             }
             layoutParams = lp
         }
+        actionsBarView = actionsBar
 
         val btnReturn = TextView(this).apply {
             text = "📱 返回軟體"
@@ -735,7 +855,9 @@ class RoadGuardService : Service(), LocationListener {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             layoutFlag,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -751,7 +873,7 @@ class RoadGuardService : Service(), LocationListener {
             }
         }
 
-        // 支援手指自由拖曳懸浮視窗；輕點主體則切換顯示/隱藏「返回軟體」與「關閉程式」按鈕
+        // 支援手指自由拖曳懸浮視窗；支援螢幕邊界外收折貼邊與點擊展開
         var initialX = 0
         var initialY = 0
         var touchX = 0f
@@ -761,6 +883,7 @@ class RoadGuardService : Service(), LocationListener {
         mainPill.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    overlayAnimator?.cancel()
                     initialX = params.x
                     initialY = params.y
                     touchX = event.rawX
@@ -773,24 +896,62 @@ class RoadGuardService : Service(), LocationListener {
                     val dy = (event.rawY - touchY).toInt()
                     if (kotlin.math.abs(dx) > 8 || kotlin.math.abs(dy) > 8) {
                         isMoved = true
-                        params.x = initialX + dx
-                        params.y = initialY + dy
-                        windowManager?.updateViewLayout(root, params)
+                        autoExpandedForAlert = false
+                        val dm = resources.displayMetrics
+                        val measuredW = getOverlayWidth()
+                        val minVisible = dp(46)
+
+                        // 限制 X 座標：允許移出螢幕邊界，但確保至少保留 minVisible (46dp) 在螢幕內，絕不丟失視窗
+                        val minX = -(measuredW - minVisible)
+                        val maxX = dm.widthPixels - minVisible
+                        params.x = (initialX + dx).coerceIn(minX, maxX)
+
+                        // 限制 Y 座標：確保在狀態列下方與虛擬導航列上方
+                        val minY = dp(24)
+                        val maxY = dm.heightPixels - dp(70)
+                        params.y = (initialY + dy).coerceIn(minY, maxY)
+
+                        try {
+                            windowManager?.updateViewLayout(root, params)
+                        } catch (_: Exception) {}
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!isMoved) {
-                        // 輕點主體：切換展開或收起
-                        if (actionsBar.visibility == View.VISIBLE) {
-                            actionsBar.visibility = View.GONE
-                            toggleHintTv.text = " ▾ "
-                            mainHandler.removeCallbacks(autoCollapseRunnable)
+                        // 輕點主體：若處於邊界收折狀態，點擊立刻彈出展開；否則切換展開或收起「返回/關閉」選單
+                        if (dockState != DockSide.NONE) {
+                            restoreFloatingOverlayFromDock()
                         } else {
-                            actionsBar.visibility = View.VISIBLE
-                            toggleHintTv.text = " ▴ "
-                            mainHandler.removeCallbacks(autoCollapseRunnable)
-                            mainHandler.postDelayed(autoCollapseRunnable, 8000L)
+                            if (actionsBar.visibility == View.VISIBLE) {
+                                actionsBar.visibility = View.GONE
+                                toggleHintTv.text = " ▾ "
+                                mainHandler.removeCallbacks(autoCollapseRunnable)
+                            } else {
+                                actionsBar.visibility = View.VISIBLE
+                                toggleHintTv.text = " ▴ "
+                                mainHandler.removeCallbacks(autoCollapseRunnable)
+                                mainHandler.postDelayed(autoCollapseRunnable, 8000L)
+                            }
+                        }
+                    } else {
+                        // 拖曳放開：支援智慧貼邊吸附收折
+                        if (isEdgeDockingEnabled) {
+                            val dm = resources.displayMetrics
+                            val measuredW = getOverlayWidth()
+                            if (params.x < dp(24)) {
+                                dockFloatingOverlay(DockSide.LEFT)
+                            } else if (params.x > dm.widthPixels - measuredW - dp(24)) {
+                                dockFloatingOverlay(DockSide.RIGHT)
+                            } else {
+                                dockState = DockSide.NONE
+                                root.alpha = 1.0f
+                                toggleHintTv.text = " ▾ "
+                            }
+                        } else {
+                            dockState = DockSide.NONE
+                            root.alpha = 1.0f
+                            toggleHintTv.text = " ▾ "
                         }
                     }
                     true
@@ -845,12 +1006,19 @@ class RoadGuardService : Service(), LocationListener {
     }
 
     fun hideFloatingOverlay() {
+        overlayAnimator?.cancel()
+        overlayAnimator = null
+        dockState = DockSide.NONE
+        autoExpandedForAlert = false
         val v = floatingRootView ?: return
         try {
             windowManager?.removeView(v)
         } catch (_: Exception) {
         }
         floatingRootView = null
+        floatingParams = null
+        actionsBarView = null
+        floatToggleHintTv = null
     }
 
     fun isFloatingOverlayShowing(): Boolean = floatingRootView != null
@@ -889,6 +1057,44 @@ class RoadGuardService : Service(), LocationListener {
             val nav = snap.navState
             val isNav = nav != null && nav.isNavigating
 
+            val hasDangerAlert = snap.isOverspeed ||
+                (snap.nearestCamera != null && snap.nearestCamera.distanceMeters <= 500.0) ||
+                (snap.nearestRoadEvent != null && snap.nearestRoadEvent.event.severity == EventSeverity.CLOSURE && snap.nearestRoadEvent.distanceMeters <= 1000.0) ||
+                snap.inIntervalZone
+
+            // 貼邊收折狀態下，若偵測到超速、前方500m內有測速照相、或道路封閉，自動滑出展開以保行車安全；危機解除後自動縮回貼邊
+            if (dockState != DockSide.NONE) {
+                if (hasDangerAlert && !autoExpandedForAlert) {
+                    autoExpandedForAlert = true
+                    val dm = resources.displayMetrics
+                    val margin16 = (16 * dm.density).toInt()
+                    val measuredW = getOverlayWidth()
+                    val targetX = if (dockState == DockSide.LEFT) {
+                        margin16
+                    } else {
+                        (dm.widthPixels - measuredW - margin16).coerceAtLeast(margin16)
+                    }
+                    floatingRootView?.alpha = 1.0f
+                    floatToggleHintTv?.text = " ▾ "
+                    animateOverlayX(targetX)
+                } else if (!hasDangerAlert && autoExpandedForAlert) {
+                    autoExpandedForAlert = false
+                    val dm = resources.displayMetrics
+                    val minHandle = (46 * dm.density).toInt()
+                    val measuredW = getOverlayWidth()
+                    floatingRootView?.alpha = 0.85f
+                    if (dockState == DockSide.LEFT) {
+                        floatToggleHintTv?.text = " ▶ "
+                        val targetX = -(measuredW - minHandle)
+                        animateOverlayX(targetX)
+                    } else {
+                        floatToggleHintTv?.text = " ◀ "
+                        val targetX = dm.widthPixels - minHandle
+                        animateOverlayX(targetX)
+                    }
+                }
+            }
+
             val cam = snap.nearestCamera
             if (cam != null && (cam.distanceMeters <= 500.0 || !isNav)) {
                 floatSpeedLimitTv?.text = "${cam.camera.speedLimit}"
@@ -900,7 +1106,7 @@ class RoadGuardService : Service(), LocationListener {
                 val distKmStr = String.format("%.1f", nav.remainingDistanceMeters / 1000.0)
                 floatCameraTitleTv?.text = "🧭 ${nav.currentRoadName} (${distKmStr}km)"
             } else {
-                floatSpeedLimitTv?.text = "--"
+                floatSpeedLimitTv?.text = if (dockState == DockSide.RIGHT && !autoExpandedForAlert) "◀" else "--"
                 floatCameraTitleTv?.text = "📸 前方無測速 (${snap.bearingLabel})"
             }
 
