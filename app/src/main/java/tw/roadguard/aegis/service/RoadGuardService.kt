@@ -238,7 +238,7 @@ class RoadGuardService : Service(), LocationListener {
      * 啟動實境模擬試駕：自動挑選或建立真實測速桿 + 道路施工/封閉測試路線
      */
     fun startDemoSimulation(scenarioIdx: Int = 0) {
-        simScenarioIndex = scenarioIdx % 3
+        simScenarioIndex = scenarioIdx % 4
         simStep = 0
         isSimulating = true
         voiceEngine.resetMemory()
@@ -253,7 +253,7 @@ class RoadGuardService : Service(), LocationListener {
                 currentBearingDeg = 0f // 往北行駛
                 currentSpeedKmh = 74   // 故意略超速以展示神盾超速紅閃警報
                 ensureDemoTargetsExist(
-                    camLat = 24.1552, camLng = 120.6311, limit = 60, isInterval = false,
+                    camLat = 24.1552, camLng = 120.6311, limit = 60, camType = CameraType.FIXED,
                     camAddr = "臺中市西屯區環中路三段(近朝馬路)固定測速",
                     evLat = 24.1605, evLng = 120.6311, isClosure = true,
                     evRoad = "環中路往台灣大道(市政路前)",
@@ -267,25 +267,39 @@ class RoadGuardService : Service(), LocationListener {
                 currentBearingDeg = 180f // 往南行駛
                 currentSpeedKmh = 108
                 ensureDemoTargetsExist(
-                    camLat = 25.0745, camLng = 121.4419, limit = 100, isInterval = false,
+                    camLat = 25.0745, camLng = 121.4419, limit = 100, camType = CameraType.FIXED,
                     camAddr = "國道一號五楊高架南下 50.2K 固定式測速照相",
                     evLat = 25.0698, evLng = 121.4419, isClosure = false,
                     evRoad = "汐止楊梅-國道1號高架南下",
                     evDesc = "機場系統出口匝道前，外側車道施工緩撞車作業中，請注意減速避讓"
                 )
             }
-            else -> {
+            2 -> {
                 simRouteName = "模擬路線 3：台61線西濱快速道路 (區間測速 80 + 半半施工單車道管制)"
                 currentLat = 23.8235
                 currentLng = 120.2830
                 currentBearingDeg = 180f // 往南行駛
                 currentSpeedKmh = 86
                 ensureDemoTargetsExist(
-                    camLat = 23.8168, camLng = 120.2830, limit = 80, isInterval = true,
+                    camLat = 23.8168, camLng = 120.2830, limit = 80, camType = CameraType.INTERVAL,
                     camAddr = "台61線西濱快速道路 (區間測速起點)",
                     evLat = 23.8112, evLng = 120.2830, isClosure = true,
                     evRoad = "(西濱快速)-台61線南下 214K",
                     evDesc = "公路設施改善工程半半施工，封閉外側車道僅維持單車道通行，請依工區速限減速"
+                )
+            }
+            else -> {
+                simRouteName = "模擬路線 4：新北坪林/北宜公路 33K (經常出沒移動式測速 40 + 彎道工程)"
+                currentLat = 24.9185
+                currentLng = 121.6654
+                currentBearingDeg = 180f // 往南行駛
+                currentSpeedKmh = 52   // 故意超速以展示經常出沒點超速預警
+                ensureDemoTargetsExist(
+                    camLat = 24.9125, camLng = 121.6654, limit = 40, camType = CameraType.HOTSPOT,
+                    camAddr = "台9線北宜公路 33.1K 財茂彎路段【經常出沒移動式測速】",
+                    evLat = 24.9085, evLng = 121.6654, isClosure = false,
+                    evRoad = "北宜公路坪林段",
+                    evDesc = "路面改善工程佔用外側車道，請減速慢行注意安全"
                 )
             }
         }
@@ -304,7 +318,7 @@ class RoadGuardService : Service(), LocationListener {
     }
 
     private fun ensureDemoTargetsExist(
-        camLat: Double, camLng: Double, limit: Int, isInterval: Boolean, camAddr: String,
+        camLat: Double, camLng: Double, limit: Int, camType: CameraType, camAddr: String,
         evLat: Double, evLng: Double, isClosure: Boolean, evRoad: String, evDesc: String
     ) {
         repository.cameras.removeAll { it.id.startsWith("SIM-") }
@@ -322,7 +336,7 @@ class RoadGuardService : Service(), LocationListener {
                 lng = camLng,
                 directText = "雙向",
                 speedLimit = limit,
-                type = if (isInterval) CameraType.INTERVAL else CameraType.FIXED
+                type = camType
             )
         )
 
@@ -359,10 +373,10 @@ class RoadGuardService : Service(), LocationListener {
 
         // 模擬接近測速桿後自動微調車速
         if (simStep in 18..28) {
-            currentSpeedKmh = (currentSpeedKmh - 2).coerceAtLeast(56)
+            currentSpeedKmh = (currentSpeedKmh - 2).coerceAtLeast(36)
         } else if (simStep > 45) {
             simStep = 0
-            startDemoSimulation((simScenarioIndex + 1) % 3)
+            startDemoSimulation((simScenarioIndex + 1) % 4)
             return
         }
         recomputeRadarState()
@@ -385,6 +399,8 @@ class RoadGuardService : Service(), LocationListener {
 
         val candidateCameras = ArrayList<ScoredCamera>()
         for (cam in repository.cameras) {
+            if (cam.type == CameraType.HOTSPOT && !voiceEngine.isHotspotAlertEnabled) continue
+
             val dLat = kotlin.math.abs(cam.lat - currentLat)
             val dLng = kotlin.math.abs(cam.lng - currentLng)
             if (dLat > 0.04 || dLng > 0.04) continue
@@ -828,8 +844,9 @@ class RoadGuardService : Service(), LocationListener {
             val cam = snap.nearestCamera
             if (cam != null) {
                 floatSpeedLimitTv?.text = "${cam.camera.speedLimit}"
+                val icon = if (cam.camera.type == CameraType.HOTSPOT) "🚨" else "📸"
                 floatCameraTitleTv?.text =
-                    "📸 ${cam.distanceMeters.roundToInt()}m | ${cam.camera.type.label}"
+                    "$icon ${cam.distanceMeters.roundToInt()}m | ${cam.camera.type.label}"
             } else {
                 floatSpeedLimitTv?.text = "--"
                 floatCameraTitleTv?.text = "📸 前方無測速 (${snap.bearingLabel})"

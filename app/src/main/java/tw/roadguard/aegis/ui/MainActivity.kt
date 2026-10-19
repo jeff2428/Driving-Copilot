@@ -608,7 +608,11 @@ class MainActivity : AppCompatActivity() {
         }
         row.addView(tv(iconText, 16f, iconTextColor, true).apply {
             gravity = Gravity.CENTER
-            background = if (iconFill == "CAM") oval("#FFFFFF", "#E5383B", 3) else rounded(iconFill, 10)
+            background = when (iconFill) {
+                "CAM" -> oval("#FFFFFF", "#E5383B", 3)
+                "HOTSPOT" -> oval("#FFF7ED", "#EA580C", 3)
+                else -> rounded(iconFill, 10)
+            }
         }, lp(dp(40), dp(40)))
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, dp(8), 0) }
         col.addView(tv(title, 14f, cText, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
@@ -636,9 +640,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun cameraRow(sc: ScoredCamera): View {
         val c = sc.camera
+        val isHotspot = c.type == CameraType.HOTSPOT
+        val fill = if (isHotspot) "HOTSPOT" else "CAM"
+        val prefix = if (isHotspot) "🚨 " else ""
         return listRow(
-            "${c.speedLimit}", "CAM", "#111111",
-            "${c.type.label}・速限 ${c.speedLimit}",
+            "${c.speedLimit}", fill, if (isHotspot) "#C2410C" else "#111111",
+            "$prefix${c.type.label}・速限 ${c.speedLimit}",
             "${c.city}${c.region} ${c.address}",
             fmtDist(sc.distanceMeters)
         ) {
@@ -944,6 +951,7 @@ class MainActivity : AppCompatActivity() {
         val cams = repo?.cameras ?: emptyList()
         val evs = repo?.roadEvents ?: emptyList()
         val intervalCnt = cams.count { it.type == CameraType.INTERVAL }
+        val hotspotCnt = cams.count { it.type == CameraType.HOTSPOT }
         val techCnt = cams.count { it.type == CameraType.TECH }
         val closureCnt = evs.count { !it.isCleared && it.severity == EventSeverity.CLOSURE }
         val constrCnt = evs.count { !it.isCleared && it.severity == EventSeverity.CONSTRUCTION }
@@ -952,11 +960,11 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(10), 0, dp(10))
         }
-        verHeader.addView(tv("☁️ 圖資版本 v${repo?.dataVersionStr ?: "2026.10.18"}", 15f, "#38BDF8", true))
+        verHeader.addView(tv("☁️ 圖資版本 v${repo?.dataVersionStr ?: "2026.10.19"}", 15f, "#38BDF8", true))
         verHeader.addView(tv("通道：${repo?.lastSyncChannelStr ?: "內建題庫"}・更新：${repo?.lastCameraSyncDateStr ?: "--"}", 12f, cSub).apply {
             setPadding(0, dp(2), 0, dp(6))
         })
-        verHeader.addView(tv("📸 測速 ${cams.size} 支（區間 $intervalCnt・科技執法 $techCnt）", 12.5f, cText))
+        verHeader.addView(tv("📸 測速 ${cams.size} 處（區間 $intervalCnt・經常出沒 $hotspotCnt・科技執法 $techCnt）", 12.5f, cText))
         verHeader.addView(tv("🚧 路況 ${evs.size} 筆（⛔ 封閉 $closureCnt・🚧 施工 $constrCnt）", 12.5f, cText).apply {
             setPadding(0, dp(2), 0, dp(10))
         })
@@ -1016,6 +1024,11 @@ class MainActivity : AppCompatActivity() {
         g1.addView(divider(), lp(MATCH, 1))
         g1.addView(switchRow("只提醒前方同方向", "過濾對向車道與後方的施工、測速", s?.forwardConeOnly ?: true) {
             svc?.forwardConeOnly = it; svc?.recomputeRadarState()
+        })
+        g1.addView(divider(), lp(MATCH, 1))
+        g1.addView(switchRow("提醒經常出沒點", "提醒警方經常架設移動式測速、雷射槍之取締熱點", s?.voiceEngine?.isHotspotAlertEnabled ?: true) {
+            svc?.voiceEngine?.isHotspotAlertEnabled = it
+            svc?.recomputeRadarState()
         })
         g1.addView(divider(), lp(MATCH, 1))
         g1.addView(switchRow("通過測速後「叮咚」", "提醒你已經通過測速點", s?.voiceEngine?.isPassChimeEnabled ?: true) {
@@ -1234,11 +1247,18 @@ class MainActivity : AppCompatActivity() {
             } else alertSecondary.visibility = View.GONE
         } else if (cam != null) {
             val c = cam.camera
-            val hot = if (s.isOverspeed) cRed else "#60A5FA"
+            val isHotspot = c.type == CameraType.HOTSPOT
+            val hot = when {
+                s.isOverspeed -> cRed
+                isHotspot -> "#EA580C"
+                else -> "#60A5FA"
+            }
             alertCardBg.setStroke(dp(2), color(hot))
             alertIcon.text = "${c.speedLimit}"
-            alertIcon.setTextColor(color("#111111"))
-            alertIcon.background = oval("#FFFFFF", "#E5383B", 5)
+            alertIcon.setTextColor(if (isHotspot) color("#C2410C") else color("#111111"))
+            val iconBorder = if (isHotspot) "#EA580C" else "#E5383B"
+            val iconBg = if (isHotspot) "#FFF7ED" else "#FFFFFF"
+            alertIcon.background = oval(iconBg, iconBorder, 5)
             alertDist.text = fmtDist(cam.distanceMeters)
             alertType.text = if (s.isOverspeed) "超速！請減速" else c.type.label
             alertType.setTextColor(color(hot))
@@ -1266,7 +1286,9 @@ class MainActivity : AppCompatActivity() {
                 cams.put(JSONObject().apply {
                     put("id", c.id); put("lat", c.lat); put("lng", c.lng); put("limit", c.speedLimit)
                     put("type", c.type.label); put("address", c.address); put("direct", c.directText)
-                    put("interval", c.type == CameraType.INTERVAL); put("hot", hot); put("sig", "${c.speedLimit}-$hot")
+                    put("interval", c.type == CameraType.INTERVAL)
+                    put("hotspot", c.type == CameraType.HOTSPOT)
+                    put("hot", hot); put("sig", "${c.speedLimit}-$hot-${c.type.name}")
                 })
             }
             val evs = JSONArray()

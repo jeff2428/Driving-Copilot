@@ -18,7 +18,9 @@
     color:#111; font:800 10px/16px sans-serif; text-align:center; box-sizing:border-box;
     box-shadow:0 1px 4px rgba(0,0,0,.45); }
   .cam.interval { border-color:#7C3AED; }
+  .cam.hotspot { border-color:#EA580C; background:#FFF7ED; color:#9A3412; font-weight:900; }
   .cam.hot { transform:scale(1.35); box-shadow:0 0 0 4px rgba(229,56,59,.35); }
+  .cam.hotspot.hot { transform:scale(1.35); box-shadow:0 0 0 4px rgba(234,88,12,.4); }
 
   .ev { width:24px; height:24px; border-radius:7px; color:#fff; font:700 13px/24px sans-serif; text-align:center;
     box-shadow:0 1px 5px rgba(0,0,0,.5); border:2px solid #fff; box-sizing:border-box; }
@@ -132,10 +134,16 @@
     syncLayer(camMarkers, showCams ? (p.cameras || []) : [],
       function (c) {
         c.z = c.hot ? 900 : 100;
+        var isInterval = !!c.interval;
+        var isHotspot = !!c.hotspot || c.type === '經常出沒點';
+        var cls = 'cam' + (isInterval ? ' interval' : '') + (isHotspot ? ' hotspot' : '') + (c.hot ? ' hot' : '');
         return L.divIcon({ className:'', iconSize:[22,22], iconAnchor:[11,11],
-          html:'<div class="cam' + (c.interval ? ' interval' : '') + (c.hot ? ' hot' : '') + '">' + c.limit + '</div>' });
+          html:'<div class="' + cls + '">' + c.limit + '</div>' });
       },
-      function (c) { return '<b>' + c.type + '・速限 ' + c.limit + '</b><br>' + c.address + '<br><small>方向：' + c.direct + '</small>'; },
+      function (c) {
+        var prefix = (c.hotspot || c.type === '經常出沒點') ? '🚨 ' : '';
+        return '<b>' + prefix + c.type + '・速限 ' + c.limit + '</b><br>' + c.address + '<br><small>方向：' + c.direct + '</small>';
+      },
       function (c) { return c.id; });
 
     var glyph = { CLOSURE:'⛔', CONSTRUCTION:'🚧', HAZARD:'⚠', CONGESTION:'≡' };

@@ -292,6 +292,11 @@ class TaiwanOpenDataRepository(private val context: Context) {
             val cameraType = when {
                 address.contains("區間") || directText.contains("區間") -> CameraType.INTERVAL
                 address.contains("科技執法") || directText.contains("科技執法") || address.contains("不停讓") -> CameraType.TECH
+                address.contains("經常出沒") || directText.contains("經常出沒") ||
+                    address.contains("移動") || directText.contains("移動") ||
+                    address.contains("流動") || directText.contains("流動") ||
+                    address.contains("三腳架") || directText.contains("三腳架") ||
+                    address.contains("雷射") || directText.contains("雷射") -> CameraType.HOTSPOT
                 else -> CameraType.FIXED
             }
 

@@ -6,6 +6,7 @@ enum class CameraType(val label: String) {
     FIXED("固定測速"),
     INTERVAL("區間測速"),
     TECH("科技執法"),
+    HOTSPOT("經常出沒點"),
     CUSTOM("自訂測速黑點")
 }
 

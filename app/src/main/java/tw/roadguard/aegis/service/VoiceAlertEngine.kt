@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import tw.roadguard.aegis.model.CameraType
 import tw.roadguard.aegis.model.EventSeverity
 import tw.roadguard.aegis.model.RoadEvent
 import tw.roadguard.aegis.model.SpeedCamera
@@ -22,10 +23,23 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val prefs = appContext.getSharedPreferences("roadguard_voice_prefs", Context.MODE_PRIVATE)
 
-    var isVoiceEnabled: Boolean = true
-    var isPassChimeEnabled: Boolean = true
-    var overspeedToleranceKmh: Int = 10 // 台灣常見 +10 km/h 寬限值
+    var isVoiceEnabled: Boolean
+        get() = prefs.getBoolean("voice_enabled", true)
+        set(value) = prefs.edit().putBoolean("voice_enabled", value).apply()
+
+    var isPassChimeEnabled: Boolean
+        get() = prefs.getBoolean("pass_chime_enabled", true)
+        set(value) = prefs.edit().putBoolean("pass_chime_enabled", value).apply()
+
+    var overspeedToleranceKmh: Int
+        get() = prefs.getInt("overspeed_tol", 10)
+        set(value) = prefs.edit().putInt("overspeed_tol", value).apply()
+
+    var isHotspotAlertEnabled: Boolean
+        get() = prefs.getBoolean("hotspot_alert_enabled", true)
+        set(value) = prefs.edit().putBoolean("hotspot_alert_enabled", value).apply()
 
     // 紀錄已播報過的階段 (1=遠距初報, 2=近距提醒)
     private val announcedEventStages = ConcurrentHashMap<String, Int>()
@@ -106,6 +120,7 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
      */
     fun checkAndAnnounceCamera(camera: SpeedCamera, distanceMeters: Double, currentSpeedKmh: Int) {
         if (!isVoiceEnabled) return
+        if (camera.type == CameraType.HOTSPOT && !isHotspotAlertEnabled) return
         val distInt = (distanceMeters / 50).toInt() * 50
         val stage = when {
             distanceMeters <= 380.0 -> 2
@@ -118,13 +133,26 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         if (stage > prevStage) {
             announcedCameraStages[camera.id] = stage
             val isOver = currentSpeedKmh > (camera.speedLimit + overspeedToleranceKmh)
+            val isHotspot = camera.type == CameraType.HOTSPOT
             val msg = if (stage == 1) {
-                "注意，前方 $distInt 公尺，有${camera.type.label}，速限 ${camera.speedLimit} 公里"
+                if (isHotspot) {
+                    "注意，前方 $distInt 公尺，經常出沒移動式測速，速限 ${camera.speedLimit} 公里"
+                } else {
+                    "注意，前方 $distInt 公尺，有${camera.type.label}，速限 ${camera.speedLimit} 公里"
+                }
             } else {
                 if (isOver) {
-                    "警告！前方 $distInt 公尺測速照相，速限 ${camera.speedLimit} 公里，您目前已超速，請立即減速！"
+                    if (isHotspot) {
+                        "警告！前方 $distInt 公尺經常出沒移動測速，速限 ${camera.speedLimit} 公里，您目前已超速，請立即減速！"
+                    } else {
+                        "警告！前方 $distInt 公尺測速照相，速限 ${camera.speedLimit} 公里，您目前已超速，請立即減速！"
+                    }
                 } else {
-                    "接近${camera.type.label}，速限 ${camera.speedLimit} 公里"
+                    if (isHotspot) {
+                        "接近經常出沒測速點，速限 ${camera.speedLimit} 公里"
+                    } else {
+                        "接近${camera.type.label}，速限 ${camera.speedLimit} 公里"
+                    }
                 }
             }
             speakNow(msg, urgentTone = isOver)
