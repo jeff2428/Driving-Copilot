@@ -119,6 +119,15 @@ data class NavState(
     val etaFormatted: String = "--:--"
 )
 
+data class DestinationCandidate(
+    val name: String,
+    val address: String,
+    val lat: Double,
+    val lng: Double,
+    val category: String = "地點",
+    val distanceMeters: Double = 0.0
+)
+
 data class RouteScanResult(
     val destinationName: String,
     val originLat: Double,
@@ -142,6 +151,7 @@ data class RadarSnapshot(
     val speedKmh: Int = 0,
     val bearingDeg: Float = 0f,
     val bearingLabel: String = "北",
+    val isDrivingActive: Boolean = false,
     val isSimulating: Boolean = false,
     val simRouteName: String = "",
     val nearestCamera: ScoredCamera? = null,

@@ -79,6 +79,10 @@ class RoadGuardService : Service(), LocationListener {
     private var intervalSpeedSum: Double = 0.0
     private var intervalSampleCount: Int = 0
 
+    // 行車模式狀態（預設待命靜音，按下開始行車後啟用）
+    var isDrivingActive: Boolean = false
+        private set
+
     // 實境模擬試駕狀態
     var isSimulating: Boolean = false
         private set
@@ -244,6 +248,7 @@ class RoadGuardService : Service(), LocationListener {
      * 啟動實境模擬試駕：自動挑選或建立真實測速桿 + 道路施工/封閉測試路線
      */
     fun startDemoSimulation(scenarioIdx: Int = 0) {
+        isDrivingActive = true
         simScenarioIndex = scenarioIdx % 4
         simStep = 0
         isSimulating = true
@@ -432,8 +437,10 @@ class RoadGuardService : Service(), LocationListener {
 
         val nearestCam = candidateCameras.firstOrNull { it.distanceMeters <= dynamicCamRadius }
 
+        val canAlert = isDrivingActive || isSimulating || navEngine.isNavigating
+
         // 檢查是否剛剛通過上一支測速桿 -> 播放神盾「叮咚」解除音
-        if (approachingCameraId != null) {
+        if (canAlert && approachingCameraId != null) {
             val stillSame = nearestCam?.camera?.id == approachingCameraId
             if (!stillSame && approachingCameraMinDist <= 260.0) {
                 voiceEngine.playCameraPassedChime()
@@ -441,7 +448,7 @@ class RoadGuardService : Service(), LocationListener {
                 approachingCameraMinDist = Double.MAX_VALUE
             }
         }
-        if (nearestCam != null) {
+        if (canAlert && nearestCam != null) {
             if (nearestCam.camera.id != approachingCameraId) {
                 approachingCameraId = nearestCam.camera.id
                 approachingCameraMinDist = nearestCam.distanceMeters
@@ -505,7 +512,7 @@ class RoadGuardService : Service(), LocationListener {
             it.distanceMeters <= dynamicEventRadius &&
                     (!forwardConeOnly || it.relativeAngleDeg <= 72.0 || currentSpeedKmh <= 10)
         }
-        if (alertEvent != null) {
+        if (canAlert && alertEvent != null) {
             voiceEngine.checkAndAnnounceRoadEvent(alertEvent.event, alertEvent.distanceMeters)
         }
 
@@ -518,6 +525,7 @@ class RoadGuardService : Service(), LocationListener {
             speedKmh = currentSpeedKmh,
             bearingDeg = currentBearingDeg,
             bearingLabel = GeoUtils.compassLabel(currentBearingDeg),
+            isDrivingActive = isDrivingActive,
             isSimulating = isSimulating,
             simRouteName = simRouteName,
             nearestCamera = nearestCam,
@@ -547,6 +555,7 @@ class RoadGuardService : Service(), LocationListener {
     @SuppressLint("ClickableViewAccessibility")
     fun showFloatingOverlay(): Boolean {
         if (!Settings.canDrawOverlays(this)) return false
+        isDrivingActive = true
         if (floatingRootView != null) return true
 
         val dp = { v: Int ->
@@ -846,7 +855,23 @@ class RoadGuardService : Service(), LocationListener {
 
     fun isFloatingOverlayShowing(): Boolean = floatingRootView != null
 
+    fun startDrivingMode() {
+        isDrivingActive = true
+        voiceEngine.speakNavigation("神盾行車防護已啟動，祝您行車平安")
+        recomputeRadarState()
+    }
+
+    fun stopDrivingMode() {
+        isDrivingActive = false
+        if (navEngine.isNavigating) {
+            navEngine.stopNavigation()
+        }
+        voiceEngine.speakNavigation("已切換為待命靜音模式")
+        recomputeRadarState()
+    }
+
     fun startNavigation(route: tw.roadguard.aegis.model.NavRoute) {
+        isDrivingActive = true
         navEngine.startNavigation(route)
         recomputeRadarState()
     }

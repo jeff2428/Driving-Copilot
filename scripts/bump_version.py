@@ -70,8 +70,7 @@ def bump_version(custom_name: str = None):
 
     ver_obj["versionCode"] = new_code
     ver_obj["versionName"] = new_name
-    ver_obj["apkDownloadUrl"] = "https://github.com/jeff2428/Driving-Copilot/releases/latest/download/TW-RoadGuard-Aegis.apk"
-    ver_obj["releaseNotes"] = f"版本 v{new_name} 更新：\n1. 更新最新全台測速照相與施工封閉資料庫\n2. 系統效能優化與穩定性提升"
+    ver_obj["releaseNotes"] = f"版本 v{new_name} 更新：\n1. 預設不顯示警告，點擊「開始行車」再啟動測速與路況提醒\n2. 「要去哪裡」搜尋結果完整顯示名稱與地址，點選確認後再規劃導航\n3. 搜尋候選列表支援一鍵返回與多點選擇\n4. 浮動視窗與背景行車防護模式聯動優化"
     ver_obj.setdefault("forceUpdate", False)
 
     JSON_FILE.parent.mkdir(parents=True, exist_ok=True)

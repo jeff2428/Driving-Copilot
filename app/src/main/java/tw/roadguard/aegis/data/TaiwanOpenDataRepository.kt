@@ -978,45 +978,76 @@ class TaiwanOpenDataRepository(private val context: Context) {
         return minD
     }
 
-    private fun resolveTaiwanDestination(query: String): Triple<String, Double, Double>? {
-        val q = query.trim()
-        if (q.isEmpty()) return null
+    data class PresetPlace(val name: String, val address: String, val lat: Double, val lng: Double, val category: String)
 
+    val taiwanPresets = listOf(
+        PresetPlace("台北車站", "台北市中正區北平西路3號", 25.0478, 121.5170, "交通樞紐"),
+        PresetPlace("台北101", "台北市信義區信義路五段7號 (信義商圈)", 25.0339, 121.5645, "地標景點"),
+        PresetPlace("桃園機場", "桃園市大園區航站南路9號 (國道2號端)", 25.0797, 121.2342, "交通樞紐"),
+        PresetPlace("新竹科學園區", "新竹市東區新安路 (國道1號竹科交流道)", 24.7816, 121.0061, "園區幹道"),
+        PresetPlace("台中國家歌劇院", "台中市西屯區惠來路二段101號 (市政路/台灣大道)", 24.1627, 120.6403, "文化地標"),
+        PresetPlace("高鐵台中站", "台中市烏日區高鐵東一路26號 (台74烏日段)", 24.1121, 120.6156, "交通樞紐"),
+        PresetPlace("逢甲夜市", "台中市西屯區文華路 (逢甲大學商圈)", 24.1788, 120.6458, "熱門商圈"),
+        PresetPlace("鹿港老街", "彰化縣鹿港鎮瑤林街/埔頭街 (台61西濱快速道路段)", 24.0566, 120.4313, "歷史觀光"),
+        PresetPlace("日月潭", "南投縣魚池鄉中山路599號 (國道6號/台21線)", 23.8661, 120.9158, "熱門風景區"),
+        PresetPlace("阿里山", "嘉義縣阿里山鄉中正村59號 (台18線阿里山公路)", 23.5103, 120.8025, "熱門風景區"),
+        PresetPlace("台南火車站", "台南市東區前鋒路210號 (北門路商圈)", 22.9971, 120.2126, "交通樞紐"),
+        PresetPlace("高鐵左營站", "高雄市左營區高鐵路105號 (國道10號末端)", 22.6874, 120.3075, "交通樞紐"),
+        PresetPlace("高雄夢時代", "高雄市前鎮區中華五路789號 (時代大道)", 22.5951, 120.3069, "熱門商圈"),
+        PresetPlace("宜蘭礁溪", "宜蘭縣礁溪鄉礁溪路五段 (國道5號雪山隧道端)", 24.8235, 121.7711, "溫泉觀光"),
+        PresetPlace("花蓮市區", "花蓮縣花蓮市國聯一路100號 (台9線蘇花改段)", 23.9872, 121.6015, "交通樞紐")
+    )
+
+    /**
+     * 搜尋台灣目的地：傳回包含「地點名稱」與「詳細地址」的多筆候選結果
+     */
+    fun searchDestinations(query: String, originLat: Double, originLng: Double): List<DestinationCandidate> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+
+        val results = ArrayList<DestinationCandidate>()
+
+        // 1. 比對內建台灣熱門地標庫
+        for (p in taiwanPresets) {
+            if (p.name.contains(q, ignoreCase = true) || p.address.contains(q, ignoreCase = true) || q.contains(p.name)) {
+                val dist = GeoUtils.distanceMeters(originLat, originLng, p.lat, p.lng)
+                results.add(
+                    DestinationCandidate(
+                        name = p.name,
+                        address = p.address,
+                        lat = p.lat,
+                        lng = p.lng,
+                        category = p.category,
+                        distanceMeters = dist
+                    )
+                )
+            }
+        }
+
+        // 2. 支援直接座標輸入 (如: 24.1627, 120.6403)
         val parts = q.split(",", "，")
         if (parts.size == 2) {
             val lat = parts[0].trim().toDoubleOrNull()
             val lng = parts[1].trim().toDoubleOrNull()
             if (lat != null && lng != null && lat in 20.0..27.0 && lng in 118.0..124.0) {
-                return Triple("座標目的地", lat, lng)
+                val dist = GeoUtils.distanceMeters(originLat, originLng, lat, lng)
+                results.add(
+                    DestinationCandidate(
+                        name = "自訂座標點",
+                        address = String.format(Locale.TAIWAN, "緯度 %.4f, 經度 %.4f", lat, lng),
+                        lat = lat,
+                        lng = lng,
+                        category = "座標",
+                        distanceMeters = dist
+                    )
+                )
             }
         }
 
-        // 內建台灣熱門地標與常施工幹道快速解析庫（秒回且免網路延遲）
-        val presets = mapOf(
-            "台北車站" to Triple("台北車站", 25.0478, 121.5170),
-            "台北101" to Triple("台北 101 信義商圈", 25.0339, 121.5645),
-            "桃園機場" to Triple("桃園國際機場 (國2端)", 25.0797, 121.2342),
-            "新竹科學園區" to Triple("新竹科學園區 (國1竹科)", 24.7816, 121.0061),
-            "台中歌劇院" to Triple("台中國家歌劇院 (市政路/台灣大道)", 24.1627, 120.6403),
-            "台中高鐵" to Triple("高鐵台中站 (台74烏日段)", 24.1121, 120.6156),
-            "逢甲夜市" to Triple("台中逢甲商圈 (環中路/河南路)", 24.1788, 120.6458),
-            "鹿港老街" to Triple("彰化鹿港 (台61西濱快速道路段)", 24.0566, 120.4313),
-            "日月潭" to Triple("南投日月潭 (國6/台21線)", 23.8661, 120.9158),
-            "阿里山" to Triple("嘉義阿里山 (台18線施工熱區)", 23.5103, 120.8025),
-            "台南火車站" to Triple("台南火車站 (東區/永康)", 22.9971, 120.2126),
-            "高雄左營" to Triple("高鐵左營站 (國10末端)", 22.6874, 120.3075),
-            "高雄夢時代" to Triple("高雄前鎮夢時代 (中山四路)", 22.5951, 120.3069),
-            "宜蘭礁溪" to Triple("宜蘭礁溪 (國5雪山隧道)", 24.8235, 121.7711),
-            "花蓮市區" to Triple("花蓮市區 (台9線蘇花改區間測速段)", 23.9872, 121.6015)
-        )
-        for ((k, v) in presets) {
-            if (q.contains(k) || k.contains(q)) return v
-        }
-
-        // 呼叫 OSM Nominatim 搜尋台灣任一地址或路名
-        return try {
+        // 3. 呼叫 OSM Nominatim 台灣地區查詢（取得包含名稱與地址的多筆候選結果）
+        try {
             val encoded = URLEncoder.encode("台灣 $q", "UTF-8")
-            val url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=tw&q=$encoded"
+            val url = "https://nominatim.openstreetmap.org/search?format=json&limit=8&countrycodes=tw&addressdetails=1&q=$encoded"
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 8000
                 readTimeout = 8000
@@ -1025,16 +1056,69 @@ class TaiwanOpenDataRepository(private val context: Context) {
             }
             if (conn.responseCode == 200) {
                 val arr = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
-                if (arr.length() > 0) {
-                    val obj = arr.getJSONObject(0)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
                     val lat = obj.getString("lat").toDouble()
                     val lon = obj.getString("lon").toDouble()
-                    val displayName = obj.optString("display_name", q).split(",").firstOrNull() ?: q
-                    Triple(displayName, lat, lon)
-                } else null
-            } else null
+
+                    val rawDisplay = obj.optString("display_name", q)
+                    val addrObj = obj.optJSONObject("address")
+                    val placeName = obj.optString("name").ifBlank {
+                        rawDisplay.split(",").firstOrNull()?.trim() ?: q
+                    }
+                    val fullAddress = formatTaiwanAddress(addrObj, rawDisplay)
+                    val dist = GeoUtils.distanceMeters(originLat, originLng, lat, lon)
+                    val cat = obj.optString("type", "地點")
+
+                    // 避免重複座標
+                    if (results.none { kotlin.math.abs(it.lat - lat) < 0.0008 && kotlin.math.abs(it.lng - lon) < 0.0008 }) {
+                        results.add(
+                            DestinationCandidate(
+                                name = placeName,
+                                address = fullAddress,
+                                lat = lat,
+                                lng = lon,
+                                category = cat,
+                                distanceMeters = dist
+                            )
+                        )
+                    }
+                }
+            }
         } catch (_: Exception) {
-            null
         }
+
+        // 依直線距離由近到遠排序
+        results.sortBy { it.distanceMeters }
+        return results
+    }
+
+    private fun formatTaiwanAddress(addrObj: JSONObject?, displayName: String): String {
+        if (addrObj != null) {
+            val city = addrObj.optString("city").ifBlank { addrObj.optString("county") }
+            val town = addrObj.optString("town").ifBlank {
+                addrObj.optString("suburb").ifBlank { addrObj.optString("district") }
+            }
+            val road = addrObj.optString("road")
+            val house = addrObj.optString("house_number")
+            val components = listOf(city, town, road, house).filter { it.isNotBlank() }
+            if (components.isNotEmpty()) {
+                return components.joinToString("")
+            }
+        }
+        // 後備方案：整理 displayName（移除重複與國名）
+        val tokens = displayName.split(",").map { it.trim() }
+            .filter { it.isNotBlank() && it != "臺灣" && it != "台灣" && !it.all { c -> c.isDigit() } }
+        return if (tokens.size > 1) {
+            tokens.drop(1).reversed().joinToString("")
+        } else {
+            displayName
+        }
+    }
+
+    private fun resolveTaiwanDestination(query: String): Triple<String, Double, Double>? {
+        val candidates = searchDestinations(query, 24.1605, 120.6311)
+        val first = candidates.firstOrNull() ?: return null
+        return Triple(first.name, first.lat, first.lng)
     }
 }

@@ -116,6 +116,7 @@ class MainActivity : AppCompatActivity() {
     private var nearbyFreshTv: TextView? = null
     private var routeInput: EditText? = null
     private var routeResultHost: LinearLayout? = null
+    private var lastCandidates: List<DestinationCandidate>? = null
 
     private val snapshotListener: (RadarSnapshot) -> Unit = { s -> runOnUiThread { render(s) } }
 
@@ -574,7 +575,7 @@ class MainActivity : AppCompatActivity() {
         }
         sheet.addView(search, lp(MATCH, WRAP))
 
-        startDrivingBtn = tv("▶  開始行車　懸浮提醒＋Google Maps", 16f, "#FFFFFF", true).apply {
+        startDrivingBtn = tv("▶  開始行車 (啟動測速與路況提醒)", 16f, "#FFFFFF", true).apply {
             gravity = Gravity.CENTER
             background = rounded(cBlue, 14)
             setOnClickListener { startDriving() }
@@ -772,7 +773,7 @@ class MainActivity : AppCompatActivity() {
 
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val input = EditText(this).apply {
-            hint = "輸入目的地，例如：台中歌劇院"
+            hint = "搜尋地點或地址，例如：逢甲夜市"
             setHintTextColor(color("#64748B"))
             setTextColor(color(cText))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
@@ -781,14 +782,14 @@ class MainActivity : AppCompatActivity() {
             inputType = InputType.TYPE_CLASS_TEXT
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             setSingleLine()
-            setOnEditorActionListener { v, _, _ -> runScan(v.text.toString()); true }
+            setOnEditorActionListener { v, _, _ -> runSearch(v.text.toString()); true }
         }
         routeInput = input
         row.addView(input, lp(0, WRAP, 1f))
-        row.addView(tv("掃描", 14f, "#FFFFFF", true).apply {
+        row.addView(tv("搜尋", 14f, "#FFFFFF", true).apply {
             gravity = Gravity.CENTER
             background = rounded(cBlue, 12)
-            setOnClickListener { runScan(input.text.toString()) }
+            setOnClickListener { runSearch(input.text.toString()) }
         }, lp(dp(72), dp(48)).apply { leftMargin = dp(8) })
         panelHost.addView(row, lp(MATCH, WRAP))
 
@@ -798,7 +799,7 @@ class MainActivity : AppCompatActivity() {
             presets.addView(tv(p, 12.5f, "#CBD5E1").apply {
                 background = rounded(cField, 16)
                 setPadding(dp(12), dp(7), dp(12), dp(7))
-                setOnClickListener { input.setText(p); runScan(p) }
+                setOnClickListener { input.setText(p); runSearch(p) }
             }, lp(WRAP, WRAP).apply { rightMargin = dp(6) })
         }
         presetScroll.addView(presets)
@@ -806,25 +807,138 @@ class MainActivity : AppCompatActivity() {
 
         routeResultHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(8), 0, 0) }
         panelHost.addView(routeResultHost)
-        lastScan?.let { renderScan(it) }
+        val curScan = lastScan
+        val curCands = lastCandidates
+        if (curScan != null) {
+            renderScan(curScan)
+        } else if (curCands != null && curCands.isNotEmpty()) {
+            renderCandidates(curCands, "")
+        }
     }
 
-    private fun runScan(query: String) {
+    private fun runScan(query: String) = runSearch(query)
+
+    private fun runSearch(query: String) {
         val q = query.trim()
         if (q.isEmpty()) return
         hideKeyboard()
         val host = routeResultHost ?: return
         host.removeAllViews()
-        host.addView(tv("正在規劃「$q」並掃描沿線…", 13f, cSub).apply { setPadding(0, dp(12), 0, dp(12)) })
+        host.addView(tv("🔍 正在搜尋「$q」的相關地點與詳細地址…", 13.5f, "#93C5FD").apply {
+            setPadding(0, dp(14), 0, dp(14))
+        })
         val lat = svc?.currentLat ?: 24.1605
         val lng = svc?.currentLng ?: 120.6311
         Thread {
-            val res = svc?.repository?.scanRouteCorridor(q, lat, lng)
+            val candidates = svc?.repository?.searchDestinations(q, lat, lng) ?: emptyList()
+            runOnUiThread {
+                lastCandidates = candidates
+                if (candidates.isEmpty()) {
+                    routeResultHost?.let {
+                        it.removeAllViews()
+                        it.addView(tv("❌ 找不到「$q」相關地點\n請嘗試輸入更明確的路名、地標或地址（例如：台中市西屯區惠來路）", 13.5f, "#FCA5A5").apply {
+                            setPadding(0, dp(14), 0, dp(14))
+                            setLineSpacing(dp(4).toFloat(), 1f)
+                        })
+                    }
+                } else {
+                    renderCandidates(candidates, q)
+                }
+            }
+        }.start()
+    }
+
+    private fun renderCandidates(candidates: List<DestinationCandidate>, query: String) {
+        val host = routeResultHost ?: return
+        host.removeAllViews()
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, dp(10))
+        }
+        header.addView(tv("🔍 找到 ${candidates.size} 個相關地點（請點選以規劃路線）：", 13.5f, cSub, true), lp(0, WRAP, 1f))
+        host.addView(header)
+
+        for (cand in candidates) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = rounded(cCard, 14, cLine, 1)
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                isClickable = true
+                setOnClickListener { planAndShowRoute(cand) }
+            }
+
+            val badge = when {
+                cand.category.contains("交通") || cand.category.contains("火車") || cand.category.contains("捷運") || cand.category.contains("機場") -> "🚄"
+                cand.category.contains("景點") || cand.category.contains("風景") || cand.category.contains("文化") -> "🎯"
+                cand.category.contains("商圈") || cand.category.contains("夜市") || cand.category.contains("購物") -> "🛍️"
+                cand.category.contains("大學") || cand.category.contains("學校") -> "🎓"
+                cand.category.contains("醫院") -> "🏥"
+                cand.category == "座標" -> "🌐"
+                else -> "📍"
+            }
+            card.addView(tv(badge, 18f).apply {
+                gravity = Gravity.CENTER
+                background = rounded(cField, 10)
+            }, lp(dp(38), dp(38)))
+
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(10), 0, dp(8), 0)
+            }
+            col.addView(tv(cand.name, 15f, cText, true).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            })
+            col.addView(tv("📍 ${cand.address}", 12f, "#94A3B8").apply {
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+                setPadding(0, dp(2), 0, 0)
+            })
+            card.addView(col, lp(0, WRAP, 1f))
+
+            val rightCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            }
+            if (cand.distanceMeters > 0) {
+                rightCol.addView(tv(fmtDist(cand.distanceMeters), 12f, "#38BDF8", true).apply {
+                    gravity = Gravity.END
+                })
+            }
+            rightCol.addView(tv("選擇 ➔", 11.5f, "#60A5FA", true).apply {
+                gravity = Gravity.END
+                setPadding(0, dp(3), 0, 0)
+            })
+            card.addView(rightCol, lp(WRAP, WRAP))
+
+            val itemWrap = LinearLayout(this).apply { setPadding(0, 0, 0, dp(8)) }
+            itemWrap.addView(card, lp(MATCH, WRAP))
+            host.addView(itemWrap)
+        }
+    }
+
+    private fun planAndShowRoute(cand: DestinationCandidate) {
+        hideKeyboard()
+        val host = routeResultHost ?: return
+        host.removeAllViews()
+        host.addView(tv("🛣️ 正在規劃通往「${cand.name}」的最佳路線…", 13.5f, "#93C5FD").apply {
+            setPadding(0, dp(14), 0, dp(4))
+        })
+        host.addView(tv("📍 ${cand.address}", 12f, cSub).apply {
+            setPadding(0, 0, 0, dp(14))
+        })
+        val lat = svc?.currentLat ?: 24.1605
+        val lng = svc?.currentLng ?: 120.6311
+        Thread {
+            val res = svc?.repository?.scanRouteCorridorDirect(cand.name, cand.lat, cand.lng, lat, lng)
             runOnUiThread {
                 if (res == null) {
                     routeResultHost?.let {
                         it.removeAllViews()
-                        it.addView(tv("找不到「$q」，請換個更明確的地名或路名", 13f, "#FCA5A5").apply { setPadding(0, dp(12), 0, dp(12)) })
+                        it.addView(tv("規劃路徑失敗，請稍候重試", 13.5f, "#FCA5A5").apply { setPadding(0, dp(12), 0, dp(12)) })
                     }
                 } else {
                     lastScan = res
@@ -859,6 +973,16 @@ class MainActivity : AppCompatActivity() {
                 put("destLng", res.destLng)
             }
             webView.evaluateJavascript("window.drawScannedRoute($obj);", null)
+        }
+
+        val candidates = lastCandidates
+        if (candidates != null && candidates.size > 1) {
+            val backRow = tv("↩️ 返回搜尋結果列表 (${candidates.size} 個地點)", 12.5f, "#93C5FD", true).apply {
+                background = rounded(cField, 10)
+                setPadding(dp(10), dp(6), dp(10), dp(6))
+                setOnClickListener { renderCandidates(candidates, res.destinationName) }
+            }
+            host.addView(backRow, lp(WRAP, WRAP).apply { bottomMargin = dp(8) })
         }
 
         host.addView(tv("${res.destinationName}", 16f, cText, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
@@ -1280,9 +1404,10 @@ class MainActivity : AppCompatActivity() {
     // 即時渲染
     // =====================================================================
     private fun render(s: RadarSnapshot) {
-        // 時速表
+        // 時速表（僅在行車狀態且超速時才亮紅圈警示）
         speedTv.text = "${s.speedKmh}"
-        if (s.isOverspeed) {
+        val activeDriving = s.isDrivingActive || s.isSimulating || (s.navState?.isNavigating == true)
+        if (s.isOverspeed && activeDriving) {
             speedTv.setTextColor(Color.WHITE)
             speedCircleBg.setColor(color(cRed))
             speedCircleBg.setStroke(dp(3), color("#FDA4AF"))
@@ -1317,9 +1442,14 @@ class MainActivity : AppCompatActivity() {
             startDrivingBtn.text = "🛑  結束導航 (${nav.destinationName})"
             startDrivingBtn.background = rounded("#DC2626", 14)
             startDrivingBtn.setOnClickListener { stopInAppNavigation() }
+        } else if (s.isDrivingActive) {
+            navBanner.visibility = View.GONE
+            startDrivingBtn.text = "⏸️  結束行車 (切換為待命靜音模式)"
+            startDrivingBtn.background = rounded(cField, 14, cLine, 1)
+            startDrivingBtn.setOnClickListener { startDriving() }
         } else {
             navBanner.visibility = View.GONE
-            startDrivingBtn.text = "▶  開始行車　懸浮提醒＋Google Maps"
+            startDrivingBtn.text = "▶  開始行車 (啟動測速與路況提醒)"
             startDrivingBtn.background = rounded(cBlue, 14)
             startDrivingBtn.setOnClickListener { startDriving() }
         }
@@ -1332,6 +1462,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderAlert(s: RadarSnapshot) {
+        // 未開始行車且非模擬/非導航中：預設不顯示警告，保持安靜待命
+        if (!s.isDrivingActive && !s.isSimulating && s.navState?.isNavigating != true) {
+            alertCard.visibility = View.GONE
+            idleChip.visibility = View.VISIBLE
+            idleChip.text = "⏸️ 雷達待命中・點擊下方「開始行車」啟動測速與路況提醒"
+            return
+        }
+
         val cam = s.nearestCamera
         val ev = s.nearestRoadEvent
 
@@ -1479,27 +1617,52 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startDriving() {
+        val s = svc ?: return
+        if (s.isDrivingActive) {
+            s.stopDrivingMode()
+            Toast.makeText(this, "已結束行車，進入待命靜音模式", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         val scan = lastScan
         val route = scan?.navRoute
         if (route != null) {
             AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("選擇導航模式")
+                .setTitle("開始行車：選擇導航模式")
                 .setMessage("目的地：${scan.destinationName}\n約 ${String.format(Locale.TAIWAN, "%.1f", scan.distanceKm)} 公里・${scan.durationMin} 分鐘")
                 .setPositiveButton("🚀 軟體內建即時導航") { _, _ ->
+                    s.startDrivingMode()
                     startInAppNavigation(route)
                 }
                 .setNeutralButton("🗺️ Google Maps + 懸浮窗") { _, _ ->
+                    s.startDrivingMode()
                     launchWithOverlay("google.navigation:q=${scan.destLat},${scan.destLng}&mode=d")
                 }
                 .setNegativeButton("取消", null)
                 .show()
         } else {
-            launchWithOverlay(null)
+            val options = arrayOf(
+                "🛡️ 啟動本機雷達提醒 (維持在此畫面)",
+                "🗺️ 搭配 Google Maps (啟動懸浮窗提醒)"
+            )
+            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("開始行車")
+                .setItems(options) { _, which ->
+                    s.startDrivingMode()
+                    if (which == 1) {
+                        launchWithOverlay(null)
+                    } else {
+                        Toast.makeText(this, "行車模式已啟動：開始測速與路況預警", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
         }
     }
 
     /** 開啟懸浮提醒後切到 Google Maps；uri 為 null 時直接開 Google Maps 主畫面 */
     private fun launchWithOverlay(uri: String?) {
+        svc?.startDrivingMode()
         if (!Settings.canDrawOverlays(this)) {
             AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("需要「顯示在其他應用程式上層」")
