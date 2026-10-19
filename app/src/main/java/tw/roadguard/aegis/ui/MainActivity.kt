@@ -747,10 +747,124 @@ class MainActivity : AppCompatActivity() {
         panelHost.addView(nearbyListHost)
     }
 
+    private var tunnelCardDir: String = "S"
+
+    private fun buildHsuehshanTunnelCard(): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded("#111827", 14)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            val lp = LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                bottomMargin = dp(12)
+            }
+            layoutParams = lp
+        }
+
+        val topRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        topRow.addView(tv("🚇 雪隧即時車道建議", 14.5f, "#38BDF8", true), lp(0, WRAP, 1f))
+
+        val btnS = tv("南下 (往宜蘭)", 12f, if (tunnelCardDir == "S") "#FFFFFF" else cSub, true).apply {
+            background = if (tunnelCardDir == "S") rounded(cBlue, 8) else rounded(cField, 8)
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setOnClickListener {
+                tunnelCardDir = "S"
+                svc?.latestSnapshot?.let { renderNearbyList(it) }
+            }
+        }
+        val btnN = tv("北上 (往台北)", 12f, if (tunnelCardDir == "N") "#FFFFFF" else cSub, true).apply {
+            background = if (tunnelCardDir == "N") rounded(cBlue, 8) else rounded(cField, 8)
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setOnClickListener {
+                tunnelCardDir = "N"
+                svc?.latestSnapshot?.let { renderNearbyList(it) }
+            }
+        }
+        topRow.addView(btnS)
+        topRow.addView(btnN, LinearLayout.LayoutParams(WRAP, WRAP).apply { leftMargin = dp(6) })
+        card.addView(topRow)
+
+        val advice = tw.roadguard.aegis.data.HsuehshanTunnelClient.getAdvice(tunnelCardDir, 0.0)
+
+        // 建議車道橫幅
+        val adviceBanner = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded("#1E293B", 10)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            val lp = LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                topMargin = dp(8)
+                bottomMargin = dp(8)
+            }
+            layoutParams = lp
+        }
+        adviceBanner.addView(tv("👉 建議走${advice.recommendedLaneName}（${advice.recommendedLaneSide}）", 13.5f, "#34D399", true), lp(0, WRAP, 1f))
+        adviceBanner.addView(tv(advice.reason, 12f, "#FBBF24"))
+        card.addView(adviceBanner)
+
+        // 內側 vs 外側速度對比欄
+        val colsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+
+        val innerSpeedStr = advice.innerSpeedKmh?.let { "$it km/h" } ?: "--"
+        val innerCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = if (advice.recommendedLane == "inner") rounded("#064E3B", 10) else rounded("#1F2937", 10)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        innerCol.addView(tv("內側車道 (左線)", 12f, if (advice.recommendedLane == "inner") "#A7F3D0" else cSub))
+        innerCol.addView(tv(innerSpeedStr, 17f, if (advice.recommendedLane == "inner") "#34D399" else "#FFFFFF", true))
+        val innerMinStr = advice.innerTravelMin?.let { "約 ${String.format("%.1f", it)} 分" } ?: "--"
+        innerCol.addView(tv(innerMinStr, 11f, cSub))
+        colsRow.addView(innerCol, lp(0, WRAP, 1f))
+
+        val outerSpeedStr = advice.outerSpeedKmh?.let { "$it km/h" } ?: "--"
+        val outerCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = if (advice.recommendedLane == "outer") rounded("#064E3B", 10) else rounded("#1F2937", 10)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        outerCol.addView(tv("外側車道 (右線)", 12f, if (advice.recommendedLane == "outer") "#A7F3D0" else cSub))
+        outerCol.addView(tv(outerSpeedStr, 17f, if (advice.recommendedLane == "outer") "#34D399" else "#FFFFFF", true))
+        val outerMinStr = advice.outerTravelMin?.let { "約 ${String.format("%.1f", it)} 分" } ?: "--"
+        outerCol.addView(tv(outerMinStr, 11f, cSub))
+        colsRow.addView(outerCol, lp(0, WRAP, 1f).apply { leftMargin = dp(8) })
+        card.addView(colsRow)
+
+        // 試聽語音與提醒
+        val bottomRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val lp = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(8) }
+            layoutParams = lp
+        }
+        bottomRow.addView(tv("⚠️ 雪隧內雙白線禁止變換車道", 11f, "#94A3B8"), lp(0, WRAP, 1f))
+
+        val btnVoice = tv("🔊 試聽語音", 12f, "#38BDF8", true).apply {
+            background = rounded("#0F2942", 8)
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setOnClickListener {
+                svc?.voiceEngine?.announceHsuehshanTunnel(advice.copy(isApproachingEntrance = true), force = true)
+            }
+        }
+        bottomRow.addView(btnVoice)
+        card.addView(bottomRow)
+
+        return card
+    }
+
     private fun renderNearbyList(s: RadarSnapshot) {
         val host = nearbyListHost ?: return
         nearbyFreshTv?.text = "路況更新 ${s.lastUpdatedTime}・測速題庫 ${svc?.repository?.lastCameraSyncDateStr ?: "--"}"
         host.removeAllViews()
+
+        // 🚇 國道5號 雪山隧道即時車道分析 (置頂卡片)
+        host.addView(buildHsuehshanTunnelCard())
 
         val events = if (nearbyFilter == 2) emptyList() else s.nearbyEvents.filter {
             nearbyFilter == 0 || it.event.severity == EventSeverity.CLOSURE || it.event.severity == EventSeverity.CONSTRUCTION
@@ -1315,6 +1429,10 @@ class MainActivity : AppCompatActivity() {
         g1.addView(switchRow("懸浮窗支援貼邊收折", "推至螢幕左/右邊界自動收折隱藏，測速與危險時自動彈出", s?.isEdgeDockingEnabled ?: true) {
             svc?.isEdgeDockingEnabled = it
         })
+        g1.addView(divider(), lp(MATCH, 1))
+        g1.addView(switchRow("雪隧進洞前車道建議", "進入雪山隧道前 2.5km 語音提醒走內側或外側行車順暢", s?.voiceEngine?.isTunnelLaneAlertEnabled ?: true) {
+            svc?.voiceEngine?.isTunnelLaneAlertEnabled = it
+        })
         panelHost.addView(g1, lp(MATCH, WRAP).apply { bottomMargin = dp(12) })
 
         val g2 = settingsGroup()
@@ -1543,6 +1661,34 @@ class MainActivity : AppCompatActivity() {
             alertCard.visibility = View.GONE
             idleChip.visibility = View.VISIBLE
             idleChip.text = "⏸️ 雷達待命中・點擊下方「開始行車」啟動測速與路況提醒"
+            return
+        }
+
+        val tunnel = s.tunnelLaneAdvice
+        if (tunnel != null && tunnel.isApproachingEntrance) {
+            idleChip.visibility = View.GONE
+            alertCard.visibility = View.VISIBLE
+            alertCardBg.setStroke(dp(2), color("#38BDF8"))
+            alertIcon.text = "🚇"
+            alertIcon.setTextColor(Color.WHITE)
+            alertIcon.background = rounded("#0284C7", 14)
+            alertDist.text = fmtDist(tunnel.distanceToEntranceMeters)
+            alertType.text = "即將進雪隧 · 建議走${tunnel.recommendedLaneName}"
+            alertType.setTextColor(color("#38BDF8"))
+            val innerSpd = tunnel.innerSpeedKmh?.let { "${it}km/h" } ?: "--"
+            val outerSpd = tunnel.outerSpeedKmh?.let { "${it}km/h" } ?: "--"
+            alertTitle.text = "雪山隧道${tunnel.directionLabel}：${tunnel.reason}"
+            alertDesc.text = "內側 $innerSpd ｜ 外側 $outerSpd ｜ 預估 ${tunnel.tunnelTravelMin?.let { String.format("%.1f", it) } ?: "8"} 分鐘通過。雙白線全程禁止變換車道！"
+            if (!tunnel.alertEvent.isNullOrBlank()) {
+                alertSecondary.visibility = View.VISIBLE
+                alertSecondary.text = "⚠️ 隧道路況通報：${tunnel.alertEvent}"
+            } else {
+                alertSecondary.visibility = View.GONE
+            }
+            alertCard.setOnClickListener {
+                tunnelCardDir = tunnel.direction
+                openPanel(Panel.NEARBY)
+            }
             return
         }
 

@@ -70,7 +70,14 @@ def bump_version(custom_name: str = None):
 
     ver_obj["versionCode"] = new_code
     ver_obj["versionName"] = new_name
-    ver_obj["releaseNotes"] = f"版本 v{new_name} 更新：\n1. 支援懸浮視窗自由拖曳至螢幕邊界外（防遮擋導航地圖）\n2. 智慧貼邊收折功能：靠邊自動收成側邊箭頭/速限圓形小標籤\n3. 輕點邊界標籤秒速彈出恢復完整視窗\n4. 危險緊急狀況自動彈出：收折狀態下遇超速、前方500m測速或道路封閉自動滑出展開，安全通過後自動收回\n5. 設定頁面新增「懸浮窗支援貼邊收折」開關與邊界防丟失安全保護"
+    ver_obj["releaseNotes"] = (
+        f"版本 v{new_name} 更新：\n"
+        f"1. 🚇 雪山隧道進洞前車道即時建議：依據高公局路況即時比對內/外側車道車速與行車時間，推薦最順暢車道\n"
+        f"2. 🔊 智慧語音進洞前提醒：進洞前 500m~2.5km 自動播報推薦車道與時速差異，提醒隧道內禁換車道提前選道\n"
+        f"3. 🪟 懸浮視窗動態連動：接近雪隧自動滑出展開推薦車道與洞口距離倒數\n"
+        f"4. 📱 主畫面新增「雪隧即時車道建議」卡片與語音試聽功能\n"
+        f"5. ⚙️ 設定頁面新增「雪隧進洞前車道建議」開關"
+    )
     ver_obj.setdefault("forceUpdate", False)
 
     JSON_FILE.parent.mkdir(parents=True, exist_ok=True)

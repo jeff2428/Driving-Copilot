@@ -145,6 +145,26 @@ data class RouteScanResult(
     val navRoute: NavRoute? = null
 )
 
+data class HsuehshanAdvice(
+    val direction: String = "S", // "S" (南下往宜蘭) or "N" (北上往台北)
+    val directionLabel: String = "南下 (往宜蘭)",
+    val towards: String = "往宜蘭",
+    val distanceToEntranceMeters: Double = 0.0,
+    val recommendedLane: String = "outer", // "inner" or "outer"
+    val recommendedLaneName: String = "外側車道",
+    val recommendedLaneSide: String = "右線",
+    val reason: String = "外側車道較順暢",
+    val diffKmh: Int = 0,
+    val innerSpeedKmh: Int? = null,
+    val outerSpeedKmh: Int? = null,
+    val innerTravelMin: Double? = null,
+    val outerTravelMin: Double? = null,
+    val tunnelTravelMin: Double? = null,
+    val alertEvent: String? = null,
+    val isApproachingEntrance: Boolean = false,
+    val dataTime: String = "--:--"
+)
+
 data class RadarSnapshot(
     val lat: Double = 24.1605,
     val lng: Double = 120.6311,
@@ -165,7 +185,8 @@ data class RadarSnapshot(
     val lastUpdatedTime: String = "--:--",
     val totalCamerasCount: Int = 0,
     val totalActiveEventsCount: Int = 0,
-    val navState: NavState? = null
+    val navState: NavState? = null,
+    val tunnelLaneAdvice: HsuehshanAdvice? = null
 )
 
 object GeoUtils {

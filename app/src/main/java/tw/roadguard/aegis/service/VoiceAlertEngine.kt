@@ -41,9 +41,14 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         get() = prefs.getBoolean("hotspot_alert_enabled", true)
         set(value) = prefs.edit().putBoolean("hotspot_alert_enabled", value).apply()
 
+    var isTunnelLaneAlertEnabled: Boolean
+        get() = prefs.getBoolean("tunnel_lane_alert_enabled", true)
+        set(value) = prefs.edit().putBoolean("tunnel_lane_alert_enabled", value).apply()
+
     // 紀錄已播報過的階段 (1=遠距初報, 2=近距提醒)
     private val announcedEventStages = ConcurrentHashMap<String, Int>()
     private val announcedCameraStages = ConcurrentHashMap<String, Int>()
+    private var announcedTunnelDirection: String? = null
     private var lastOverspeedBeepTime = 0L
 
     private val audioFocusRequest: AudioFocusRequest = AudioFocusRequest.Builder(
@@ -231,9 +236,59 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
+    /**
+     * 雪山隧道進洞前車道建議播報 (內側 vs 外側即時車速與推薦)
+     */
+    fun announceHsuehshanTunnel(advice: tw.roadguard.aegis.model.HsuehshanAdvice, force: Boolean = false) {
+        if (!isVoiceEnabled) return
+        if (!force && !isTunnelLaneAlertEnabled) return
+
+        val speed = if (advice.recommendedLane == "inner") advice.innerSpeedKmh else advice.outerSpeedKmh
+        val tunnelMin = advice.tunnelTravelMin?.let { kotlin.math.round(it).toInt() } ?: 9
+
+        val builder = StringBuilder()
+        builder.append("即將進入雪山隧道${advice.directionLabel}。")
+
+        if (advice.diffKmh >= 3) {
+            builder.append("目前${advice.recommendedLaneName}較順暢，時速快 ${advice.diffKmh} 公里，建議行駛${advice.recommendedLaneName}！")
+        } else if (advice.reason.isNotBlank() && !advice.reason.contains("雙白線") && !advice.reason.contains("連線中")) {
+            builder.append("建議行駛${advice.recommendedLaneName}，${advice.reason}。")
+        } else {
+            builder.append("目前兩線車速相當，建議行駛${advice.recommendedLaneName}。")
+        }
+
+        if (speed != null && speed > 0) {
+            builder.append("平均時速約 $speed 公里，預估 $tunnelMin 分鐘通過。")
+        }
+
+        if (!advice.alertEvent.isNullOrBlank()) {
+            builder.append("請注意！雪隧內有路況通報：${advice.alertEvent}，請提前減速。")
+        }
+
+        builder.append("雪隧內全線禁止變換車道，請在進洞前選定車道。")
+
+        speakNow(builder.toString(), urgentTone = false)
+    }
+
+    fun checkAndAnnounceHsuehshanTunnel(advice: tw.roadguard.aegis.model.HsuehshanAdvice) {
+        if (!isVoiceEnabled || !isTunnelLaneAlertEnabled) return
+        if (!advice.isApproachingEntrance) return
+
+        // 一次進洞只播報一次
+        if (announcedTunnelDirection == advice.direction) return
+        announcedTunnelDirection = advice.direction
+
+        announceHsuehshanTunnel(advice)
+    }
+
+    fun resetTunnelAnnounced() {
+        announcedTunnelDirection = null
+    }
+
     fun resetMemory() {
         announcedCameraStages.clear()
         announcedEventStages.clear()
+        resetTunnelAnnounced()
     }
 
     private fun playSingleTone(toneType: Int, durationMs: Int) {

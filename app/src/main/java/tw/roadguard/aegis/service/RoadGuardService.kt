@@ -37,6 +37,13 @@ import kotlin.math.sin
 
 class RoadGuardService : Service(), LocationListener {
 
+    companion object {
+        const val HSUEHSHAN_SOUTH_ENTRANCE_LAT = 24.9365
+        const val HSUEHSHAN_SOUTH_ENTRANCE_LNG = 121.7142
+        const val HSUEHSHAN_NORTH_ENTRANCE_LAT = 24.8512
+        const val HSUEHSHAN_NORTH_ENTRANCE_LNG = 121.7960
+    }
+
     inner class LocalBinder : Binder() {
         fun getService(): RoadGuardService = this@RoadGuardService
     }
@@ -417,7 +424,7 @@ class RoadGuardService : Service(), LocationListener {
                     evDesc = "公路設施改善工程半半施工，封閉外側車道僅維持單車道通行，請依工區速限減速"
                 )
             }
-            else -> {
+            3 -> {
                 simRouteName = "模擬路線 4：新北坪林/北宜公路 33K (經常出沒移動式測速 40 + 彎道工程)"
                 currentLat = 24.9185
                 currentLng = 121.6654
@@ -429,6 +436,34 @@ class RoadGuardService : Service(), LocationListener {
                     evLat = 24.9085, evLng = 121.6654, isClosure = false,
                     evRoad = "北宜公路坪林段",
                     evDesc = "路面改善工程佔用外側車道，請減速慢行注意安全"
+                )
+            }
+            4 -> {
+                simRouteName = "模擬路線 5：國道5號南下 14K (即將進入雪隧南下 15.2K 坪林入口・車道建議)"
+                currentLat = 24.9450
+                currentLng = 121.7050
+                currentBearingDeg = 135f // 往東南行駛
+                currentSpeedKmh = 82
+                ensureDemoTargetsExist(
+                    camLat = 24.9365, camLng = 121.7142, limit = 90, camType = CameraType.TECH,
+                    camAddr = "國道五號南下 15.2K 雪山隧道坪林端入口",
+                    evLat = 24.9365, evLng = 121.7142, isClosure = false,
+                    evRoad = "國道5號雪山隧道南下入口",
+                    evDesc = "進入雪隧前即時車流分析：建議選定車道，隧道內雙白線禁止變換車道"
+                )
+            }
+            else -> {
+                simRouteName = "模擬路線 6：國道5號北上 29.5K (即將進入雪隧北上 28.1K 頭城入口・車道建議)"
+                currentLat = 24.8390
+                currentLng = 121.8080
+                currentBearingDeg = 320f // 往西北行駛
+                currentSpeedKmh = 80
+                ensureDemoTargetsExist(
+                    camLat = 24.8512, camLng = 121.7960, limit = 90, camType = CameraType.TECH,
+                    camAddr = "國道五號北上 28.1K 雪山隧道頭城端入口",
+                    evLat = 24.8512, evLng = 121.7960, isClosure = false,
+                    evRoad = "國道5號雪山隧道北上入口",
+                    evDesc = "進入雪隧前即時車流分析：建議選定車道，隧道內雙白線禁止變換車道"
                 )
             }
         }
@@ -507,7 +542,7 @@ class RoadGuardService : Service(), LocationListener {
             currentSpeedKmh = (currentSpeedKmh - 2).coerceAtLeast(36)
         } else if (simStep > 45) {
             simStep = 0
-            startDemoSimulation((simScenarioIndex + 1) % 4)
+            startDemoSimulation((simScenarioIndex + 1) % 6)
             return
         }
         recomputeRadarState()
@@ -637,6 +672,28 @@ class RoadGuardService : Service(), LocationListener {
         val isOverspeed = nearestCam != null &&
                 currentSpeedKmh > (nearestCam.camera.speedLimit + voiceEngine.overspeedToleranceKmh)
 
+        // 國道5號 雪山隧道進洞前車道即時建議 (南下坪林端 15.2K / 北上頭城端 28.1K)
+        val distToSouthEntrance = GeoUtils.distanceMeters(currentLat, currentLng, HSUEHSHAN_SOUTH_ENTRANCE_LAT, HSUEHSHAN_SOUTH_ENTRANCE_LNG)
+        val distToNorthEntrance = GeoUtils.distanceMeters(currentLat, currentLng, HSUEHSHAN_NORTH_ENTRANCE_LAT, HSUEHSHAN_NORTH_ENTRANCE_LNG)
+
+        val tunnelAdvice: HsuehshanAdvice? = when {
+            distToSouthEntrance <= 3500.0 && GeoUtils.angleDiff(currentBearingDeg.toDouble(), 135.0) <= 75.0 -> {
+                // 南下接近中 (往宜蘭方向，航向朝東南)
+                tw.roadguard.aegis.data.HsuehshanTunnelClient.getAdvice("S", distToSouthEntrance)
+            }
+            distToNorthEntrance <= 3500.0 && (GeoUtils.angleDiff(currentBearingDeg.toDouble(), 320.0) <= 75.0 || GeoUtils.angleDiff(currentBearingDeg.toDouble(), 350.0) <= 75.0) -> {
+                // 北上接近中 (往台北方向，航向朝西北)
+                tw.roadguard.aegis.data.HsuehshanTunnelClient.getAdvice("N", distToNorthEntrance)
+            }
+            else -> null
+        }
+
+        if (canAlert && tunnelAdvice != null && tunnelAdvice.isApproachingEntrance) {
+            voiceEngine.checkAndAnnounceHsuehshanTunnel(tunnelAdvice)
+        } else if (distToSouthEntrance > 4000.0 && distToNorthEntrance > 4000.0) {
+            voiceEngine.resetTunnelAnnounced()
+        }
+
         val snapshot = RadarSnapshot(
             lat = currentLat,
             lng = currentLng,
@@ -657,7 +714,8 @@ class RoadGuardService : Service(), LocationListener {
             lastUpdatedTime = repository.lastSyncTimeStr,
             totalCamerasCount = repository.cameras.size,
             totalActiveEventsCount = activeTotal,
-            navState = navEngine.currentNavState
+            navState = navEngine.currentNavState,
+            tunnelLaneAdvice = tunnelAdvice
         )
         latestSnapshot = snapshot
         updateFloatingOverlayUi(snapshot)
@@ -1060,9 +1118,10 @@ class RoadGuardService : Service(), LocationListener {
             val hasDangerAlert = snap.isOverspeed ||
                 (snap.nearestCamera != null && snap.nearestCamera.distanceMeters <= 500.0) ||
                 (snap.nearestRoadEvent != null && snap.nearestRoadEvent.event.severity == EventSeverity.CLOSURE && snap.nearestRoadEvent.distanceMeters <= 1000.0) ||
-                snap.inIntervalZone
+                snap.inIntervalZone ||
+                (snap.tunnelLaneAdvice != null && snap.tunnelLaneAdvice.isApproachingEntrance)
 
-            // 貼邊收折狀態下，若偵測到超速、前方500m內有測速照相、或道路封閉，自動滑出展開以保行車安全；危機解除後自動縮回貼邊
+            // 貼邊收折狀態下，若偵測到超速、前方500m內有測速照相、道路封閉或即將進雪隧，自動滑出展開以保行車安全；危機解除後自動縮回貼邊
             if (dockState != DockSide.NONE) {
                 if (hasDangerAlert && !autoExpandedForAlert) {
                     autoExpandedForAlert = true
@@ -1095,8 +1154,14 @@ class RoadGuardService : Service(), LocationListener {
                 }
             }
 
+            val tunnel = snap.tunnelLaneAdvice
             val cam = snap.nearestCamera
-            if (cam != null && (cam.distanceMeters <= 500.0 || !isNav)) {
+            if (tunnel != null && tunnel.isApproachingEntrance) {
+                floatSpeedLimitTv?.text = "90"
+                val chosenSpeed = if (tunnel.recommendedLane == "inner") tunnel.innerSpeedKmh else tunnel.outerSpeedKmh
+                val speedStr = if (chosenSpeed != null && chosenSpeed > 0) " (${chosenSpeed}km/h)" else ""
+                floatCameraTitleTv?.text = "🚇 建議走${tunnel.recommendedLaneName}$speedStr"
+            } else if (cam != null && (cam.distanceMeters <= 500.0 || !isNav)) {
                 floatSpeedLimitTv?.text = "${cam.camera.speedLimit}"
                 val icon = if (cam.camera.type == CameraType.HOTSPOT) "🚨" else "📸"
                 floatCameraTitleTv?.text =
@@ -1111,7 +1176,11 @@ class RoadGuardService : Service(), LocationListener {
             }
 
             val ev = snap.nearestRoadEvent
-            if (nav != null && nav.isNavigating) {
+            if (tunnel != null && tunnel.isApproachingEntrance) {
+                val distM = tunnel.distanceToEntranceMeters.roundToInt()
+                floatRoadAlertTv?.text = "⚠️ 距雪隧洞口 ${distM}m · 全程禁換車道"
+                floatRoadAlertTv?.setTextColor(Color.parseColor("#38BDF8"))
+            } else if (nav != null && nav.isNavigating) {
                 val turnDist = if (nav.distanceToNextTurnMeters >= 1000) {
                     String.format("%.1fkm", nav.distanceToNextTurnMeters / 1000.0)
                 } else {
