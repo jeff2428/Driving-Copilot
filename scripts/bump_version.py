@@ -70,7 +70,7 @@ def bump_version(custom_name: str = None):
 
     ver_obj["versionCode"] = new_code
     ver_obj["versionName"] = new_name
-    ver_obj["releaseNotes"] = f"版本 v{new_name} 更新：\n1. 預設不顯示警告，點擊「開始行車」再啟動測速與路況提醒\n2. 「要去哪裡」搜尋結果完整顯示名稱與地址，點選確認後再規劃導航\n3. 搜尋候選列表支援一鍵返回與多點選擇\n4. 浮動視窗與背景行車防護模式聯動優化"
+    ver_obj["releaseNotes"] = f"版本 v{new_name} 更新：\n1. 升級五層 Google 地圖同級搜尋引擎 (支援全台分店、量販、地標與門牌號碼)\n2. 整合 Android 系統原生 Google Geocoder 與 Photon 空間加權引擎\n3. 實作台灣門牌號碼智慧分解器，遇冷門門牌自動降級定位\n4. 新增「最近搜尋歷史記錄」功能\n5. 設定面板提供自訂 Google Places API Key 選填"
     ver_obj.setdefault("forceUpdate", False)
 
     JSON_FILE.parent.mkdir(parents=True, exist_ok=True)

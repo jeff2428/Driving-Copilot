@@ -773,7 +773,7 @@ class MainActivity : AppCompatActivity() {
 
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val input = EditText(this).apply {
-            hint = "搜尋地點或地址，例如：逢甲夜市"
+            hint = "搜尋地點或門牌地址，例如：好市多、逢甲夜市"
             setHintTextColor(color("#64748B"))
             setTextColor(color(cText))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
@@ -793,12 +793,47 @@ class MainActivity : AppCompatActivity() {
         }, lp(dp(72), dp(48)).apply { leftMargin = dp(8) })
         panelHost.addView(row, lp(MATCH, WRAP))
 
-        val presetScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; setPadding(0, dp(10), 0, dp(4)) }
+        // 🕒 最近搜尋歷史記錄
+        val recents = svc?.repository?.getRecentDestinations() ?: emptyList()
+        if (recents.isNotEmpty()) {
+            val recentHeader = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(10), 0, dp(4))
+            }
+            recentHeader.addView(tv("🕒 最近搜尋", 12.5f, "#94A3B8", true), lp(0, WRAP, 1f))
+            recentHeader.addView(tv("清除", 12f, "#EF4444").apply {
+                setOnClickListener {
+                    svc?.repository?.clearRecentDestinations()
+                    openPanel(Panel.NONE)
+                    openPanel(Panel.ROUTE)
+                }
+            })
+            panelHost.addView(recentHeader)
+
+            val recentScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; setPadding(0, 0, 0, dp(4)) }
+            val recentRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            recents.take(8).forEach { cand ->
+                recentRow.addView(tv(cand.name, 12f, "#E2E8F0").apply {
+                    background = rounded(cCard, 14, "#334155", 1)
+                    setPadding(dp(10), dp(6), dp(10), dp(6))
+                    setOnClickListener {
+                        input.setText(cand.name)
+                        planAndShowRoute(cand)
+                    }
+                }, lp(WRAP, WRAP).apply { rightMargin = dp(6) })
+            }
+            recentScroll.addView(recentRow)
+            panelHost.addView(recentScroll)
+        }
+
+        // 熱門地標快捷晶片
+        val presetScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; setPadding(0, dp(6), 0, dp(4)) }
         val presets = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("台中歌劇院", "逢甲夜市", "台中高鐵", "鹿港老街", "桃園機場", "台北101", "高雄左營", "日月潭").forEach { p ->
-            presets.addView(tv(p, 12.5f, "#CBD5E1").apply {
-                background = rounded(cField, 16)
-                setPadding(dp(12), dp(7), dp(12), dp(7))
+        listOf("好市多", "新光三越", "台中歌劇院", "逢甲夜市", "台中高鐵", "板橋大遠百", "桃園機場", "台北101", "微風信義", "日月潭").forEach { p ->
+            presets.addView(tv(p, 12f, "#94A3B8").apply {
+                background = rounded(cField, 14)
+                setPadding(dp(11), dp(6), dp(11), dp(6))
                 setOnClickListener { input.setText(p); runSearch(p) }
             }, lp(WRAP, WRAP).apply { rightMargin = dp(6) })
         }
@@ -824,7 +859,7 @@ class MainActivity : AppCompatActivity() {
         hideKeyboard()
         val host = routeResultHost ?: return
         host.removeAllViews()
-        host.addView(tv("🔍 正在搜尋「$q」的相關地點與詳細地址…", 13.5f, "#93C5FD").apply {
+        host.addView(tv("🔍 正在透過 Google 地理資料庫搜尋「$q」…", 13.5f, "#93C5FD").apply {
             setPadding(0, dp(14), 0, dp(14))
         })
         val lat = svc?.currentLat ?: 24.1605
@@ -871,11 +906,14 @@ class MainActivity : AppCompatActivity() {
             }
 
             val badge = when {
-                cand.category.contains("交通") || cand.category.contains("火車") || cand.category.contains("捷運") || cand.category.contains("機場") -> "🚄"
-                cand.category.contains("景點") || cand.category.contains("風景") || cand.category.contains("文化") -> "🎯"
+                cand.name.contains("好市多") || cand.name.contains("Costco") || cand.category.contains("量販") -> "🛒"
+                cand.category.contains("百貨") || cand.category.contains("商場") || cand.name.contains("新光三越") || cand.name.contains("遠百") || cand.name.contains("SOGO") || cand.name.contains("微風") || cand.name.contains("Outlet") -> "🏢"
+                cand.category.contains("交通") || cand.name.contains("車站") || cand.name.contains("高鐵") || cand.name.contains("機場") || cand.name.contains("捷運") -> "🚄"
+                cand.category.contains("景點") || cand.category.contains("風景") || cand.category.contains("文化") || cand.category.contains("園區") -> "🎯"
                 cand.category.contains("商圈") || cand.category.contains("夜市") || cand.category.contains("購物") -> "🛍️"
                 cand.category.contains("大學") || cand.category.contains("學校") -> "🎓"
-                cand.category.contains("醫院") -> "🏥"
+                cand.category.contains("醫療") || cand.category.contains("醫院") || cand.name.contains("醫院") || cand.name.contains("診所") -> "🏥"
+                cand.category.contains("美食") || cand.category.contains("餐飲") || cand.name.contains("店") || cand.name.contains("門市") -> "🍜"
                 cand.category == "座標" -> "🌐"
                 else -> "📍"
             }
@@ -922,6 +960,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun planAndShowRoute(cand: DestinationCandidate) {
         hideKeyboard()
+        svc?.repository?.saveRecentDestination(cand)
         val host = routeResultHost ?: return
         host.removeAllViews()
         host.addView(tv("🛣️ 正在規劃通往「${cand.name}」的最佳路線…", 13.5f, "#93C5FD").apply {
@@ -1240,6 +1279,17 @@ class MainActivity : AppCompatActivity() {
                 proLicenseManager = licMgr
             )
         })
+        gCloud.addView(divider(), lp(MATCH, 1))
+
+        // 🔑 自訂 Google Places API 密鑰 (選填)
+        val hasKey = repo?.googlePlacesApiKey?.isNotBlank() == true
+        gCloud.addView(actionRow(
+            if (hasKey) "🔑 Google Places 密鑰：已設定" else "🔑 自訂 Google Places API 密鑰 (選填)",
+            if (hasKey) "點擊可修改或清除個人 Google Places API Key"
+            else "預設已支援 Android 原生 Google 地圖直連定位；可選填自訂密鑰"
+        ) {
+            showGooglePlacesKeyDialog()
+        })
         panelHost.addView(gCloud, lp(MATCH, WRAP).apply { bottomMargin = dp(12) })
 
         val g1 = settingsGroup()
@@ -1393,6 +1443,28 @@ class MainActivity : AppCompatActivity() {
             }
             .setNeutralButton("改回政府API直連") { _, _ ->
                 repo.githubRepoSlug = ""
+                openPanel(Panel.NONE)
+                openPanel(Panel.SETTINGS)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showGooglePlacesKeyDialog() {
+        val repo = svc?.repository ?: return
+        val input = EditText(this).apply {
+            hint = "貼上 Google Cloud Places API Key（留空則使用內建定位）"
+            setText(repo.googlePlacesApiKey)
+            setSingleLine()
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("自訂 Google Places API Key")
+            .setMessage("軟體預設已透過 Android 系統直連 Google 地圖後台資料庫，一般情況免填即可搜尋全台地點與門牌。\n若您擁有 Google Cloud 帳號並希望直連 Places TextSearch API，可在此填入。")
+            .setView(input)
+            .setPositiveButton("儲存") { _, _ ->
+                repo.googlePlacesApiKey = input.text.toString().trim()
+                Toast.makeText(this, if (repo.googlePlacesApiKey.isNotBlank()) "已儲存 Google Places 密鑰" else "已清除密鑰，改用系統內建 Google 定位", Toast.LENGTH_SHORT).show()
                 openPanel(Panel.NONE)
                 openPanel(Panel.SETTINGS)
             }

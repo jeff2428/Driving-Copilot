@@ -1,6 +1,8 @@
 package tw.roadguard.aegis.data
 
 import android.content.Context
+import android.location.Address
+import android.location.Geocoder
 import org.json.JSONArray
 import org.json.JSONObject
 import tw.roadguard.aegis.model.*
@@ -30,10 +32,63 @@ class TaiwanOpenDataRepository(private val context: Context) {
         private const val PREFS_NAME = "roadguard_cloud_prefs"
         private const val KEY_AUTO_DAILY = "auto_daily_update"
         private const val KEY_GITHUB_REPO = "github_repo_slug"
+        private const val KEY_GOOGLE_PLACES_KEY = "google_places_api_key"
+        private const val KEY_RECENT_SEARCHES = "recent_search_history"
         const val DEFAULT_REPO = "jeff2428/Driving-Copilot"
     }
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    var googlePlacesApiKey: String
+        get() = prefs.getString(KEY_GOOGLE_PLACES_KEY, "") ?: ""
+        set(v) = prefs.edit().putString(KEY_GOOGLE_PLACES_KEY, v.trim()).apply()
+
+    fun getRecentDestinations(): List<DestinationCandidate> {
+        val jsonStr = prefs.getString(KEY_RECENT_SEARCHES, null) ?: return emptyList()
+        val list = ArrayList<DestinationCandidate>()
+        try {
+            val arr = JSONArray(jsonStr)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    DestinationCandidate(
+                        name = o.getString("name"),
+                        address = o.getString("address"),
+                        lat = o.getDouble("lat"),
+                        lng = o.getDouble("lng"),
+                        category = o.optString("category", "歷史記錄"),
+                        distanceMeters = o.optDouble("distanceMeters", 0.0)
+                    )
+                )
+            }
+        } catch (_: Exception) {}
+        return list
+    }
+
+    fun saveRecentDestination(cand: DestinationCandidate) {
+        val current = getRecentDestinations().toMutableList()
+        current.removeAll { it.name == cand.name || (kotlin.math.abs(it.lat - cand.lat) < 0.0005 && kotlin.math.abs(it.lng - cand.lng) < 0.0005) }
+        current.add(0, cand)
+        val limited = current.take(12)
+        try {
+            val arr = JSONArray()
+            for (c in limited) {
+                arr.put(JSONObject().apply {
+                    put("name", c.name)
+                    put("address", c.address)
+                    put("lat", c.lat)
+                    put("lng", c.lng)
+                    put("category", c.category)
+                    put("distanceMeters", c.distanceMeters)
+                })
+            }
+            prefs.edit().putString(KEY_RECENT_SEARCHES, arr.toString()).apply()
+        } catch (_: Exception) {}
+    }
+
+    fun clearRecentDestinations() {
+        prefs.edit().remove(KEY_RECENT_SEARCHES).apply()
+    }
 
     val cameras = CopyOnWriteArrayList<SpeedCamera>()
     val roadEvents = CopyOnWriteArrayList<RoadEvent>()
@@ -981,25 +1036,82 @@ class TaiwanOpenDataRepository(private val context: Context) {
     data class PresetPlace(val name: String, val address: String, val lat: Double, val lng: Double, val category: String)
 
     val taiwanPresets = listOf(
+        // ---- 交通樞紐 ----
         PresetPlace("台北車站", "台北市中正區北平西路3號", 25.0478, 121.5170, "交通樞紐"),
-        PresetPlace("台北101", "台北市信義區信義路五段7號 (信義商圈)", 25.0339, 121.5645, "地標景點"),
-        PresetPlace("桃園機場", "桃園市大園區航站南路9號 (國道2號端)", 25.0797, 121.2342, "交通樞紐"),
-        PresetPlace("新竹科學園區", "新竹市東區新安路 (國道1號竹科交流道)", 24.7816, 121.0061, "園區幹道"),
-        PresetPlace("台中國家歌劇院", "台中市西屯區惠來路二段101號 (市政路/台灣大道)", 24.1627, 120.6403, "文化地標"),
-        PresetPlace("高鐵台中站", "台中市烏日區高鐵東一路26號 (台74烏日段)", 24.1121, 120.6156, "交通樞紐"),
+        PresetPlace("板橋車站", "新北市板橋區縣民大道二段7號", 25.0136, 121.4632, "交通樞紐"),
+        PresetPlace("桃園機場第一航廈", "桃園市大園區航站南路15號", 25.0818, 121.2393, "交通樞紐"),
+        PresetPlace("桃園機場第二航廈", "桃園市大園區航站南路9號", 25.0776, 121.2327, "交通樞紐"),
+        PresetPlace("高鐵新竹站", "新竹縣竹北市高鐵七路6號", 24.8083, 121.0404, "交通樞紐"),
+        PresetPlace("高鐵台中站", "台中市烏日區高鐵東一路26號", 24.1121, 120.6156, "交通樞紐"),
+        PresetPlace("台中火車站", "台中市中區台灣大道一段1號", 24.1373, 120.6869, "交通樞紐"),
+        PresetPlace("高鐵嘉義站", "嘉義縣太保市高鐵西路168號", 23.4590, 120.3235, "交通樞紐"),
+        PresetPlace("台南火車站", "台南市東區前鋒路210號", 22.9971, 120.2126, "交通樞紐"),
+        PresetPlace("高鐵台南站", "台南市歸仁區歸仁大道100號", 22.9248, 120.2858, "交通樞紐"),
+        PresetPlace("高鐵左營站", "高雄市左營區高鐵路105號", 22.6874, 120.3075, "交通樞紐"),
+        PresetPlace("高雄火車站", "高雄市三民區建國二路318號", 22.6397, 120.3021, "交通樞紐"),
+
+        // ---- 好市多 Costco 全台門市 ----
+        PresetPlace("好市多 內湖店", "台北市內湖區舊宗路一段268號", 25.0628, 121.5746, "量販賣場"),
+        PresetPlace("好市多 北投店", "台北市北投區立德路117號", 25.1278, 121.4727, "量販賣場"),
+        PresetPlace("好市多 中和店", "新北市中和區中山路二段347號", 25.0039, 121.4988, "量販賣場"),
+        PresetPlace("好市多 汐止店", "新北市汐止區大同路一段158號", 25.0597, 121.6393, "量販賣場"),
+        PresetPlace("好市多 新莊店", "新北市新莊區建國一路138號", 25.0298, 121.4278, "量販賣場"),
+        PresetPlace("好市多 南崁店", "桃園市蘆竹區南崁路一段369號", 25.0537, 121.2868, "量販賣場"),
+        PresetPlace("好市多 中壢店", "桃園市中壢區民族路六段508號", 24.9664, 121.1398, "量販賣場"),
+        PresetPlace("好市多 新竹店", "新竹市東區慈雲路188號", 24.7963, 121.0135, "量販賣場"),
+        PresetPlace("好市多 台中南屯店", "台中市南屯區文心南三路289號", 24.1350, 120.6475, "量販賣場"),
+        PresetPlace("好市多 北台中店", "台中市北屯區敦富路366號", 24.1953, 120.7061, "量販賣場"),
+        PresetPlace("好市多 嘉義店", "嘉義市東區忠孝路668號", 23.5043, 120.4533, "量販賣場"),
+        PresetPlace("好市多 台南店", "台南市北區和緯路四段8號", 23.0101, 120.1915, "量販賣場"),
+        PresetPlace("好市多 高雄店", "高雄市前鎮區中華五路656號", 22.6062, 120.3048, "量販賣場"),
+        PresetPlace("好市多 大順店", "高雄市鼓山區大順一路111號", 22.6566, 120.3093, "量販賣場"),
+
+        // ---- 熱門百貨商場與 Outlet ----
+        PresetPlace("台北101", "台北市信義區信義路五段7號 (信義商圈)", 25.0339, 121.5645, "百貨商場"),
+        PresetPlace("微風信義", "台北市信義區忠孝東路五段68號", 25.0405, 121.5666, "百貨商場"),
+        PresetPlace("微風廣場", "台北市松山區復興南路一段39號", 25.0458, 121.5447, "百貨商場"),
+        PresetPlace("遠東SOGO 台北忠孝館", "台北市大安區忠孝東路四段45號", 25.0418, 121.5442, "百貨商場"),
+        PresetPlace("板橋大遠百", "新北市板橋區新站路28號", 25.0134, 121.4658, "百貨商場"),
+        PresetPlace("MITSUI OUTLET PARK 林口", "新北市林口區文化三路一段356號", 25.0709, 121.3653, "休閒商場"),
+        PresetPlace("遠東巨城購物中心", "新竹市東區中央路229號", 24.8097, 120.9750, "百貨商場"),
+        PresetPlace("新竹科學園區", "新竹市東區新安路 (國道1號竹科交流道)", 24.7816, 121.0061, "科技園區"),
+        PresetPlace("台中國家歌劇院", "台中市西屯區惠來路二段101號 (七期市政特區)", 24.1627, 120.6403, "文化地標"),
+        PresetPlace("新光三越 台中中港店", "台中市西屯區台灣大道三段301號", 24.1648, 120.6433, "百貨商場"),
+        PresetPlace("台中大遠百", "台中市西屯區台灣大道三段251號", 24.1641, 120.6421, "百貨商場"),
+        PresetPlace("中友百貨", "台中市北區三民路三段161號 (一中商圈)", 24.1524, 120.6848, "百貨商場"),
+        PresetPlace("Mitsui Shopping Park LaLaport 台中", "台中市東區進德路600號", 24.1357, 120.6922, "休閒商場"),
+        PresetPlace("MITSUI OUTLET PARK 台中港", "台中市梧棲區臺灣大道十段168號", 24.2558, 120.5222, "休閒商場"),
         PresetPlace("逢甲夜市", "台中市西屯區文華路 (逢甲大學商圈)", 24.1788, 120.6458, "熱門商圈"),
-        PresetPlace("鹿港老街", "彰化縣鹿港鎮瑤林街/埔頭街 (台61西濱快速道路段)", 24.0566, 120.4313, "歷史觀光"),
-        PresetPlace("日月潭", "南投縣魚池鄉中山路599號 (國道6號/台21線)", 23.8661, 120.9158, "熱門風景區"),
-        PresetPlace("阿里山", "嘉義縣阿里山鄉中正村59號 (台18線阿里山公路)", 23.5103, 120.8025, "熱門風景區"),
-        PresetPlace("台南火車站", "台南市東區前鋒路210號 (北門路商圈)", 22.9971, 120.2126, "交通樞紐"),
-        PresetPlace("高鐵左營站", "高雄市左營區高鐵路105號 (國道10號末端)", 22.6874, 120.3075, "交通樞紐"),
-        PresetPlace("高雄夢時代", "高雄市前鎮區中華五路789號 (時代大道)", 22.5951, 120.3069, "熱門商圈"),
-        PresetPlace("宜蘭礁溪", "宜蘭縣礁溪鄉礁溪路五段 (國道5號雪山隧道端)", 24.8235, 121.7711, "溫泉觀光"),
-        PresetPlace("花蓮市區", "花蓮縣花蓮市國聯一路100號 (台9線蘇花改段)", 23.9872, 121.6015, "交通樞紐")
+        PresetPlace("新光三越 台南新天地", "台南市中西區西門路一段658號", 22.9868, 120.1983, "百貨商場"),
+        PresetPlace("南紡購物中心", "台南市東區中華東路一段366號", 22.9912, 120.2325, "百貨商場"),
+        PresetPlace("漢神巨蛋購物廣場", "高雄市左營區博愛二路777號", 22.6698, 120.3023, "百貨商場"),
+        PresetPlace("義享天地", "高雄市鼓山區大順一路115號", 22.6565, 120.3087, "百貨商場"),
+        PresetPlace("高雄夢時代", "高雄市前鎮區中華五路789號", 22.5951, 120.3069, "熱門商圈"),
+
+        // ---- 知名醫學中心 ----
+        PresetPlace("台大醫院", "台北市中正區中山南路7號", 25.0416, 121.5178, "醫療院所"),
+        PresetPlace("台北榮民總醫院", "台北市北投區石牌路二段201號", 25.1206, 121.5204, "醫療院所"),
+        PresetPlace("林口長庚紀念醫院", "桃園市龜山區復興街5號", 25.0601, 121.3692, "醫療院所"),
+        PresetPlace("台中榮民總醫院", "台中市西屯區台灣大道四段1650號", 24.1849, 120.6022, "醫療院所"),
+        PresetPlace("中國醫藥大學附設醫院", "台中市北區育德路2號", 24.1565, 120.6826, "醫療院所"),
+        PresetPlace("成大醫院", "台南市北區勝利路138號", 23.0016, 120.2209, "醫療院所"),
+        PresetPlace("奇美醫院", "台南市永康區中華路901號", 23.0185, 120.2246, "醫療院所"),
+        PresetPlace("高雄長庚紀念醫院", "高雄市鳥松區大埤路123號", 22.6521, 120.3582, "醫療院所"),
+        PresetPlace("花蓮慈濟醫院", "花蓮縣花蓮市中央路三段707號", 23.9989, 121.5975, "醫療院所"),
+
+        // ---- 知名觀光風景區 ----
+        PresetPlace("鹿港老街", "彰化縣鹿港鎮瑤林街 (台61西濱段)", 24.0566, 120.4313, "歷史觀光"),
+        PresetPlace("日月潭水社碼頭", "南投縣魚池鄉中山路163號", 23.8661, 120.9158, "熱門風景區"),
+        PresetPlace("清境農場", "南投縣仁愛鄉仁和路170號", 24.0583, 121.1627, "熱門風景區"),
+        PresetPlace("阿里山國家森林遊樂區", "嘉義縣阿里山鄉中正村59號", 23.5103, 120.8025, "熱門風景區"),
+        PresetPlace("墾丁大街", "屏東縣恆春鎮墾丁路", 21.9450, 120.7972, "熱門風景區"),
+        PresetPlace("宜蘭礁溪溫泉", "宜蘭縣礁溪鄉礁溪路五段", 24.8235, 121.7711, "溫泉觀光"),
+        PresetPlace("花蓮太魯閣", "花蓮縣秀林鄉富世291號", 24.1593, 121.6225, "熱門風景區")
     )
 
     /**
-     * 搜尋台灣目的地：傳回包含「地點名稱」與「詳細地址」的多筆候選結果
+     * 五層混合高精準搜尋架構（Multi-Tier Hybrid Search Engine）
+     * 支援 Google Geocoder、Photon 空間加權、Nominatim 修復版、門牌智慧分解與自訂 API Key
      */
     fun searchDestinations(query: String, originLat: Double, originLng: Double): List<DestinationCandidate> {
         val q = query.trim()
@@ -1007,9 +1119,32 @@ class TaiwanOpenDataRepository(private val context: Context) {
 
         val results = ArrayList<DestinationCandidate>()
 
-        // 1. 比對內建台灣熱門地標庫
+        // 1. 座標直接輸入辨識 (例如: 24.1627, 120.6403)
+        val parts = q.split(",", "，")
+        if (parts.size == 2) {
+            val lat = parts[0].trim().toDoubleOrNull()
+            val lng = parts[1].trim().toDoubleOrNull()
+            if (lat != null && lng != null && lat in 21.0..26.5 && lng in 118.0..123.5) {
+                val dist = GeoUtils.distanceMeters(originLat, originLng, lat, lng)
+                return listOf(
+                    DestinationCandidate(
+                        name = "自訂座標點",
+                        address = String.format(Locale.TAIWAN, "緯度 %.4f, 經度 %.4f", lat, lng),
+                        lat = lat,
+                        lng = lng,
+                        category = "座標",
+                        distanceMeters = dist
+                    )
+                )
+            }
+        }
+
+        // 2. 比對全台內建高頻地標庫 (Tier 1)
         for (p in taiwanPresets) {
-            if (p.name.contains(q, ignoreCase = true) || p.address.contains(q, ignoreCase = true) || q.contains(p.name)) {
+            val hit = p.name.contains(q, ignoreCase = true) ||
+                    p.address.contains(q, ignoreCase = true) ||
+                    q.contains(p.name, ignoreCase = true)
+            if (hit) {
                 val dist = GeoUtils.distanceMeters(originLat, originLng, p.lat, p.lng)
                 results.add(
                     DestinationCandidate(
@@ -1024,34 +1159,219 @@ class TaiwanOpenDataRepository(private val context: Context) {
             }
         }
 
-        // 2. 支援直接座標輸入 (如: 24.1627, 120.6403)
-        val parts = q.split(",", "，")
-        if (parts.size == 2) {
-            val lat = parts[0].trim().toDoubleOrNull()
-            val lng = parts[1].trim().toDoubleOrNull()
-            if (lat != null && lng != null && lat in 20.0..27.0 && lng in 118.0..124.0) {
-                val dist = GeoUtils.distanceMeters(originLat, originLng, lat, lng)
-                results.add(
-                    DestinationCandidate(
-                        name = "自訂座標點",
-                        address = String.format(Locale.TAIWAN, "緯度 %.4f, 經度 %.4f", lat, lng),
-                        lat = lat,
-                        lng = lng,
-                        category = "座標",
-                        distanceMeters = dist
-                    )
-                )
+        // 3. 若有設定 Google Places API Key，優先調用官方 API (Tier 1.5)
+        val customKey = googlePlacesApiKey
+        if (customKey.isNotBlank()) {
+            results.addAll(queryGooglePlacesApi(q, customKey, originLat, originLng))
+        }
+
+        // 4. Android 原生 Google Geocoder 直連 (Tier 2，免 Key，台灣 Android 預設搭載)
+        val googleCandidates = queryAndroidGoogleGeocoder(q, originLat, originLng)
+        for (cand in googleCandidates) {
+            if (results.none { isSameLocation(it, cand) }) {
+                results.add(cand)
             }
         }
 
-        // 3. 呼叫 OSM Nominatim 台灣地區查詢（取得包含名稱與地址的多筆候選結果）
+        // 5. Photon 空間加權搜尋 (Tier 3，依車主所在座標就近加權)
+        val photonCandidates = queryPhotonGeocoder(q, originLat, originLng)
+        for (cand in photonCandidates) {
+            if (results.none { isSameLocation(it, cand) }) {
+                results.add(cand)
+            }
+        }
+
+        // 6. OSM Nominatim 台灣修復版 (Tier 4，去除干擾前綴，鎖定台灣範圍)
+        val nominatimCandidates = queryNominatimGeocoder(q, originLat, originLng)
+        for (cand in nominatimCandidates) {
+            if (results.none { isSameLocation(it, cand) }) {
+                results.add(cand)
+            }
+        }
+
+        // 7. 台灣門牌號碼智慧分解器 (Tier 5，遇純門牌號查無結果時，分解主要路段降級定位)
+        if (results.isEmpty() && isPotentialTaiwanAddress(q)) {
+            val fallbackCandidates = smartDecomposeTaiwanAddress(q, originLat, originLng)
+            results.addAll(fallbackCandidates)
+        }
+
+        // 8. 排序演算法：完全符合查詢字詞者最優先，其餘依直線距離由近到遠排序
+        results.sortWith(
+            compareBy<DestinationCandidate> {
+                val matchScore = when {
+                    it.name.equals(q, ignoreCase = true) -> 0
+                    it.name.startsWith(q, ignoreCase = true) -> 1
+                    it.name.contains(q, ignoreCase = true) -> 2
+                    else -> 3
+                }
+                matchScore
+            }.thenBy { it.distanceMeters }
+        )
+
+        return results.take(18)
+    }
+
+    private fun isSameLocation(a: DestinationCandidate, b: DestinationCandidate): Boolean {
+        if (a.name == b.name && a.address == b.address) return true
+        val dist = GeoUtils.distanceMeters(a.lat, a.lng, b.lat, b.lng)
+        return dist < 65.0
+    }
+
+    /**
+     * Tier 2: 呼叫 Android 內建 Google 地圖服務 Geocoder (免 API Key，直接由 GMS 後端驅動)
+     */
+    private fun queryAndroidGoogleGeocoder(q: String, originLat: Double, originLng: Double): List<DestinationCandidate> {
+        val list = ArrayList<DestinationCandidate>()
+        if (!Geocoder.isPresent()) return list
         try {
-            val encoded = URLEncoder.encode("台灣 $q", "UTF-8")
-            val url = "https://nominatim.openstreetmap.org/search?format=json&limit=8&countrycodes=tw&addressdetails=1&q=$encoded"
+            val geocoder = Geocoder(context, Locale.TAIWAN)
+            // 台灣地理邊界：南緯 21.5, 東經 119.0, 北緯 26.0, 東經 122.5
+            val addresses: List<Address>? = geocoder.getFromLocationName(
+                q,
+                8,
+                21.5,
+                119.0,
+                26.0,
+                122.5
+            )
+            if (!addresses.isNullOrEmpty()) {
+                for (addr in addresses) {
+                    val lat = addr.latitude
+                    val lng = addr.longitude
+                    if (lat !in 21.0..26.5 || lng !in 118.0..123.5) continue
+
+                    val line0 = (0..addr.maxAddressLineIndex).mapNotNull { addr.getAddressLine(it) }.joinToString(" ")
+                    val fullAddress = cleanTaiwanAddressLine(line0, addr)
+                    val feat = addr.featureName
+                    val road = addr.thoroughfare
+                    val house = addr.subThoroughfare
+
+                    val name = when {
+                        !feat.isNullOrBlank() && !feat.contains("號") && feat != road -> feat
+                        !road.isNullOrBlank() && !house.isNullOrBlank() -> "$road $house"
+                        !road.isNullOrBlank() -> road
+                        else -> q
+                    }
+
+                    val cat = when {
+                        name.contains("好市多") || name.contains("Costco") -> "量販賣場"
+                        name.contains("新光三越") || name.contains("遠百") || name.contains("SOGO") || name.contains("微風") -> "百貨商場"
+                        name.contains("醫院") || name.contains("診所") -> "醫療院所"
+                        name.contains("站") || name.contains("機場") -> "交通樞紐"
+                        name.contains("店") || name.contains("門市") || name.contains("館") -> "商家門市"
+                        name.contains("路") || name.contains("街") || name.contains("號") -> "門牌地址"
+                        else -> "Google定位"
+                    }
+
+                    val dist = GeoUtils.distanceMeters(originLat, originLng, lat, lng)
+                    list.add(
+                        DestinationCandidate(
+                            name = name,
+                            address = fullAddress,
+                            lat = lat,
+                            lng = lng,
+                            category = cat,
+                            distanceMeters = dist
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+        return list
+    }
+
+    private fun cleanTaiwanAddressLine(raw: String, addr: Address): String {
+        var s = raw.trim()
+        if (s.startsWith("台灣") || s.startsWith("臺灣")) s = s.substring(2).trim()
+        s = s.replace(Regex("^[0-9]{3,5}"), "").trim()
+        if (s.startsWith("台灣") || s.startsWith("臺灣")) s = s.substring(2).trim()
+        if (s.isBlank()) {
+            val city = addr.adminArea ?: addr.subAdminArea ?: ""
+            val town = addr.locality ?: addr.subLocality ?: ""
+            val road = addr.thoroughfare ?: ""
+            val house = addr.subThoroughfare ?: ""
+            s = "$city$town$road$house".trim()
+        }
+        return s.ifBlank { raw }
+    }
+
+    /**
+     * Tier 3: 呼叫 Komoot Photon 空間加權地理編碼引擎 (依車輛座標就近排序)
+     */
+    private fun queryPhotonGeocoder(q: String, originLat: Double, originLng: Double): List<DestinationCandidate> {
+        val list = ArrayList<DestinationCandidate>()
+        try {
+            val encoded = URLEncoder.encode(q, "UTF-8")
+            val url = "https://photon.komoot.io/api/?q=$encoded&lat=$originLat&lon=$originLng&limit=6"
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 8000
-                readTimeout = 8000
-                setRequestProperty("User-Agent", "Mozilla/5.0 (TWRoadGuardAegis/1.0)")
+                connectTimeout = 6000
+                readTimeout = 6000
+                setRequestProperty("User-Agent", "Mozilla/5.0 (TWRoadGuardAegis/2.0)")
+            }
+            if (conn.responseCode == 200) {
+                val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                val features = json.optJSONArray("features")
+                if (features != null) {
+                    for (i in 0 until features.length()) {
+                        val f = features.getJSONObject(i)
+                        val geom = f.optJSONObject("geometry")
+                        val coords = geom?.optJSONArray("coordinates") ?: continue
+                        val lng = coords.getDouble(0)
+                        val lat = coords.getDouble(1)
+                        if (lat !in 21.0..26.5 || lng !in 118.0..123.5) continue
+
+                        val props = f.optJSONObject("properties") ?: JSONObject()
+                        val countryCode = props.optString("countrycode", "")
+                        if (countryCode.isNotBlank() && countryCode.uppercase(Locale.ROOT) != "TW") continue
+
+                        val name = props.optString("name").ifBlank { q }
+                        val city = props.optString("city").ifBlank { props.optString("state", "") }
+                        val district = props.optString("district").ifBlank { props.optString("locality", "") }
+                        val street = props.optString("street", "")
+                        val house = props.optString("housenumber", "")
+                        val housePart = if (house.isNotBlank()) "${house}號" else ""
+
+                        val addrParts = listOf(city, district, street, housePart).filter { it.isNotBlank() }
+                        val fullAddress = if (addrParts.isNotEmpty()) addrParts.joinToString("") else "$city $district $street".trim()
+
+                        val dist = GeoUtils.distanceMeters(originLat, originLng, lat, lng)
+                        val osmKey = props.optString("osm_key", "")
+                        val cat = when {
+                            osmKey == "shop" || osmKey == "amenity" -> "商家門市"
+                            osmKey == "tourism" || osmKey == "leisure" -> "休閒景點"
+                            name.contains("醫院") || name.contains("診所") -> "醫療院所"
+                            street.isNotBlank() -> "街道門牌"
+                            else -> "空間定位"
+                        }
+                        list.add(
+                            DestinationCandidate(
+                                name = name,
+                                address = fullAddress.ifBlank { "$name (台灣)" },
+                                lat = lat,
+                                lng = lng,
+                                category = cat,
+                                distanceMeters = dist
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return list
+    }
+
+    /**
+     * Tier 4: OSM Nominatim 台灣修復版 (無字串前綴干擾，帶入台灣邊界框約束)
+     */
+    private fun queryNominatimGeocoder(q: String, originLat: Double, originLng: Double): List<DestinationCandidate> {
+        val list = ArrayList<DestinationCandidate>()
+        try {
+            val encoded = URLEncoder.encode(q, "UTF-8")
+            val url = "https://nominatim.openstreetmap.org/search?format=json&limit=6&countrycodes=tw&viewbox=119.5,25.4,122.2,21.8&bounded=0&addressdetails=1&q=$encoded"
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 6000
+                readTimeout = 6000
+                setRequestProperty("User-Agent", "Mozilla/5.0 (TWRoadGuardAegis/2.0)")
                 setRequestProperty("Accept-Language", "zh-TW,zh;q=0.9")
             }
             if (conn.responseCode == 200) {
@@ -1060,6 +1380,7 @@ class TaiwanOpenDataRepository(private val context: Context) {
                     val obj = arr.getJSONObject(i)
                     val lat = obj.getString("lat").toDouble()
                     val lon = obj.getString("lon").toDouble()
+                    if (lat !in 21.0..26.5 || lon !in 118.0..123.5) continue
 
                     val rawDisplay = obj.optString("display_name", q)
                     val addrObj = obj.optJSONObject("address")
@@ -1070,27 +1391,99 @@ class TaiwanOpenDataRepository(private val context: Context) {
                     val dist = GeoUtils.distanceMeters(originLat, originLng, lat, lon)
                     val cat = obj.optString("type", "地點")
 
-                    // 避免重複座標
-                    if (results.none { kotlin.math.abs(it.lat - lat) < 0.0008 && kotlin.math.abs(it.lng - lon) < 0.0008 }) {
-                        results.add(
+                    list.add(
+                        DestinationCandidate(
+                            name = placeName,
+                            address = fullAddress,
+                            lat = lat,
+                            lng = lon,
+                            category = cat,
+                            distanceMeters = dist
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+        return list
+    }
+
+    /**
+     * Tier 5: 台灣門牌號碼智慧分解器 (遇純門牌號查無結果時，分解出主要路段並降級定位)
+     */
+    private fun smartDecomposeTaiwanAddress(q: String, originLat: Double, originLng: Double): List<DestinationCandidate> {
+        val list = ArrayList<DestinationCandidate>()
+        val regex = Regex("^(.*?([縣市].*?[鄉鎮市區].*?[路街道段]))(.*?[0-9一二三四五六七八九十百]+號?.*)?$")
+        val match = regex.find(q)
+        if (match != null) {
+            val roadCore = match.groupValues[1]
+            val extraPart = match.groupValues.getOrNull(3)?.trim() ?: ""
+            if (roadCore.isNotBlank() && roadCore != q) {
+                val subResults = queryPhotonGeocoder(roadCore, originLat, originLng).ifEmpty {
+                    queryNominatimGeocoder(roadCore, originLat, originLng)
+                }
+                for (cand in subResults) {
+                    val suffix = if (extraPart.isNotBlank()) " (約${extraPart}附近)" else ""
+                    list.add(
+                        DestinationCandidate(
+                            name = "${cand.name}$suffix",
+                            address = q,
+                            lat = cand.lat,
+                            lng = cand.lng,
+                            category = "門牌路段",
+                            distanceMeters = cand.distanceMeters
+                        )
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    private fun isPotentialTaiwanAddress(q: String): Boolean {
+        return (q.contains("市") || q.contains("縣")) &&
+                (q.contains("路") || q.contains("街") || q.contains("大道") || q.contains("段"))
+    }
+
+    /**
+     * 可選 Tier 1.5: 使用者個人 Google Places API Key
+     */
+    private fun queryGooglePlacesApi(q: String, key: String, originLat: Double, originLng: Double): List<DestinationCandidate> {
+        val list = ArrayList<DestinationCandidate>()
+        try {
+            val encoded = URLEncoder.encode(q, "UTF-8")
+            val url = "https://maps.googleapis.com/maps/api/place/textsearch/json?query=$encoded&location=$originLat,$originLng&radius=50000&language=zh-TW&key=$key"
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 6000
+                readTimeout = 6000
+            }
+            if (conn.responseCode == 200) {
+                val root = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                val results = root.optJSONArray("results")
+                if (results != null) {
+                    for (i in 0 until results.length()) {
+                        val item = results.getJSONObject(i)
+                        val name = item.optString("name", q)
+                        val addr = item.optString("formatted_address", "")
+                        val geom = item.optJSONObject("geometry")
+                        val loc = geom?.optJSONObject("location") ?: continue
+                        val lat = loc.getDouble("lat")
+                        val lng = loc.getDouble("lng")
+                        val dist = GeoUtils.distanceMeters(originLat, originLng, lat, lng)
+                        list.add(
                             DestinationCandidate(
-                                name = placeName,
-                                address = fullAddress,
+                                name = name,
+                                address = addr.replace("台灣", "").replace("臺灣", "").trim(),
                                 lat = lat,
-                                lng = lon,
-                                category = cat,
+                                lng = lng,
+                                category = "Google地標",
                                 distanceMeters = dist
                             )
                         )
                     }
                 }
             }
-        } catch (_: Exception) {
-        }
-
-        // 依直線距離由近到遠排序
-        results.sortBy { it.distanceMeters }
-        return results
+        } catch (_: Exception) {}
+        return list
     }
 
     private fun formatTaiwanAddress(addrObj: JSONObject?, displayName: String): String {
