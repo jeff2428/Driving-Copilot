@@ -1,0 +1,68 @@
+name: Build iOS Native (IPA)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'ios/**'
+      - '.github/workflows/build_ios.yml'
+  release:
+    types: [published, created]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    name: Build RoadGuard iOS IPA
+    runs-on: macos-14
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show Xcode Version
+        run: |
+          xcodebuild -version
+
+      - name: Build and Archive RoadGuard
+        run: |
+          mkdir -p build
+          xcodebuild archive \
+            -project ios/RoadGuard.xcodeproj \
+            -scheme RoadGuard \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath build/RoadGuard.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package into RoadGuard-Aegis.ipa
+        run: |
+          mkdir -p build/Payload
+          cp -r build/RoadGuard.xcarchive/Products/Applications/RoadGuard.app build/Payload/
+          cd build
+          zip -r -q RoadGuard-Aegis.ipa Payload
+          ls -lh RoadGuard-Aegis.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RoadGuard-Aegis-iOS-IPA
+          path: build/RoadGuard-Aegis.ipa
+          retention-days: 30
+
+      - name: Upload IPA to GitHub Release (If Release Triggered)
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${{ github.event.release.tag_name || github.ref_name }}"
+          echo "Attaching RoadGuard-Aegis.ipa to release: $TAG_NAME"
+          gh release upload "$TAG_NAME" build/RoadGuard-Aegis.ipa --clobber || true

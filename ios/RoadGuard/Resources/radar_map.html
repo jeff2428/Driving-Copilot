@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<style>/*LEAFLET_CSS*/</style>
+<style>
+  html, body, #map { margin:0; padding:0; width:100%; height:100%; background:#E9EEF3; overflow:hidden;
+    font-family: "Noto Sans TC", "PingFang TC", sans-serif; }
+  body.night, body.night #map { background:#0E1420; }
+  /* 夜間模式：把國土測繪中心白底圖反轉為深色，保留道路層次 */
+  body.night .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.82) contrast(0.92) saturate(0.55); }
+  .leaflet-control-attribution { font-size:9px !important; background:rgba(255,255,255,0.55) !important; }
+  body.night .leaflet-control-attribution { background:rgba(14,20,32,0.6) !important; color:#94A3B8 !important; }
+  body.night .leaflet-control-attribution a { color:#94A3B8 !important; }
+
+  .cam { width:22px; height:22px; border-radius:50%; background:#fff; border:3px solid #E5383B;
+    color:#111; font:800 10px/16px sans-serif; text-align:center; box-sizing:border-box;
+    box-shadow:0 1px 4px rgba(0,0,0,.45); }
+  .cam.interval { border-color:#7C3AED; }
+  .cam.hotspot { border-color:#EA580C; background:#FFF7ED; color:#9A3412; font-weight:900; }
+  .cam.hot { transform:scale(1.35); box-shadow:0 0 0 4px rgba(229,56,59,.35); }
+  .cam.hotspot.hot { transform:scale(1.35); box-shadow:0 0 0 4px rgba(234,88,12,.4); }
+
+  .ev { width:24px; height:24px; border-radius:7px; color:#fff; font:700 13px/24px sans-serif; text-align:center;
+    box-shadow:0 1px 5px rgba(0,0,0,.5); border:2px solid #fff; box-sizing:border-box; }
+  .ev.CLOSURE { background:#E11D48; }
+  .ev.CONSTRUCTION { background:#F59E0B; }
+  .ev.HAZARD { background:#7C3AED; }
+  .ev.CONGESTION { background:#64748B; }
+  .ev.hot { transform:scale(1.3); }
+
+  .me { width:38px; height:38px; }
+  .me svg { width:38px; height:38px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.45)); transition: transform .4s linear; }
+
+  .leaflet-popup-content-wrapper { border-radius:12px; }
+  .leaflet-popup-content { margin:10px 12px; font-size:13px; line-height:1.45; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script>/*LEAFLET_JS*/</script>
+<script>
+  var map, tiles, meMarker, accCircle, routeLine;
+  var camMarkers = {}, evMarkers = {};
+  var follow = true, lastZoomSpeedBand = -1;
+
+  var NLSC = 'https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}';
+  var OSM  = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+  function notify(name, v) {
+    try { if (window.Android && Android[name]) Android[name](String(v)); } catch (e) {}
+  }
+
+  function init() {
+    if (map || typeof L === 'undefined') return;
+    map = L.map('map', { zoomControl:false, attributionControl:true }).setView([24.1605, 120.6311], 15);
+    map.attributionControl.setPrefix(false);
+
+    tiles = L.tileLayer(NLSC, { maxZoom:19, maxNativeZoom:19,
+      attribution:'© 內政部國土測繪中心 臺灣通用電子地圖' }).addTo(map);
+    // 主圖磚失敗時自動改用 OpenStreetMap
+    var fallbackUsed = false;
+    tiles.on('tileerror', function () {
+      if (fallbackUsed) return;
+      fallbackUsed = true;
+      tiles.setUrl(OSM);
+      map.attributionControl.addAttribution('© OpenStreetMap');
+    });
+
+    map.on('dragstart', function () { if (follow) { follow = false; notify('onFollowChanged', false); } });
+  }
+
+  function meIcon(bearing) {
+    return L.divIcon({ className:'', iconSize:[38,38], iconAnchor:[19,19],
+      html:'<div class="me"><svg viewBox="0 0 40 40" style="transform:rotate(' + bearing + 'deg)">' +
+           '<circle cx="20" cy="20" r="17" fill="#1D4ED8" fill-opacity=".18"/>' +
+           '<path d="M20 5 L31 32 L20 26 L9 32 Z" fill="#2563EB" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/>' +
+           '</svg></div>' });
+  }
+
+  window.setNight = function (on) {
+    init();
+    document.body.classList.toggle('night', !!on);
+  };
+
+  window.recenter = function () {
+    init(); follow = true; lastZoomSpeedBand = -1;
+    if (meMarker) map.setView(meMarker.getLatLng(), map.getZoom() < 14 ? 15 : map.getZoom(), { animate:true });
+    notify('onFollowChanged', true);
+  };
+
+  window.focusPoint = function (lat, lng) {
+    init(); follow = false; notify('onFollowChanged', false);
+    map.setView([lat, lng], 16, { animate:true });
+  };
+
+  function syncLayer(store, items, makeIcon, makePopup, keyOf) {
+    var seen = {};
+    items.forEach(function (it) {
+      var k = keyOf(it); seen[k] = true;
+      var m = store[k];
+      if (!m) {
+        m = L.marker([it.lat, it.lng], { icon: makeIcon(it), zIndexOffset: it.z || 0 }).bindPopup(makePopup(it));
+        m._sig = it.sig; m.addTo(map); store[k] = m;
+      } else if (m._sig !== it.sig) {
+        m.setIcon(makeIcon(it)); m._sig = it.sig;
+      }
+    });
+    Object.keys(store).forEach(function (k) { if (!seen[k]) { map.removeLayer(store[k]); delete store[k]; } });
+  }
+
+  window.updateRadarMap = function (p) {
+    init(); if (!map) return;
+    var ll = [p.lat, p.lng];
+
+    if (!meMarker) {
+      meMarker = L.marker(ll, { icon: meIcon(p.bearing || 0), zIndexOffset: 2000, interactive:false }).addTo(map);
+    } else {
+      meMarker.setLatLng(ll);
+      var svg = meMarker.getElement() && meMarker.getElement().querySelector('svg');
+      if (svg) svg.style.transform = 'rotate(' + (p.bearing || 0) + 'deg)';
+    }
+
+    if (follow) {
+      // 導航模式下鎖定車輛近距視角，一般巡航依車速自動縮放
+      var z = isNavigatingMode ? (p.speed >= 75 ? 16 : 17) : ([14, 15, 16][p.speed >= 80 ? 0 : (p.speed >= 40 ? 1 : 2)]);
+      if (z !== lastZoomSpeedBand) { lastZoomSpeedBand = z; map.setView(ll, z, { animate:true }); }
+      else map.panTo(ll, { animate:true, duration:0.8 });
+    }
+
+    var showCams = map.getZoom() >= 13;
+    syncLayer(camMarkers, showCams ? (p.cameras || []) : [],
+      function (c) {
+        c.z = c.hot ? 900 : 100;
+        var isInterval = !!c.interval;
+        var isHotspot = !!c.hotspot || c.type === '經常出沒點';
+        var cls = 'cam' + (isInterval ? ' interval' : '') + (isHotspot ? ' hotspot' : '') + (c.hot ? ' hot' : '');
+        return L.divIcon({ className:'', iconSize:[22,22], iconAnchor:[11,11],
+          html:'<div class="' + cls + '">' + c.limit + '</div>' });
+      },
+      function (c) {
+        var prefix = (c.hotspot || c.type === '經常出沒點') ? '🚨 ' : '';
+        return '<b>' + prefix + c.type + '・速限 ' + c.limit + '</b><br>' + c.address + '<br><small>方向：' + c.direct + '</small>';
+      },
+      function (c) { return c.id; });
+
+    var glyph = { CLOSURE:'⛔', CONSTRUCTION:'🚧', HAZARD:'⚠', CONGESTION:'≡' };
+    syncLayer(evMarkers, p.events || [],
+      function (e) {
+        e.z = e.hot ? 1000 : 300;
+        return L.divIcon({ className:'', iconSize:[24,24], iconAnchor:[12,12],
+          html:'<div class="ev ' + e.severity + (e.hot ? ' hot' : '') + '">' + (glyph[e.severity] || '!') + '</div>' });
+      },
+      function (e) { return '<b>' + e.label + '｜' + e.road + '</b><br>' + e.comment + '<br><small>' + e.schedule + '</small>'; },
+      function (e) { return e.id; });
+  };
+
+  var destMarker = null;
+  var isNavigatingMode = false;
+
+  window.drawScannedRoute = function (r) {
+    init(); if (!map) return;
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+    if (!r || !r.points || r.points.length < 2) return;
+    routeLine = L.polyline(r.points, { color:'#2563EB', weight:7, opacity:.9 }).addTo(map);
+    if (r.destLat && r.destLng) {
+      destMarker = L.marker([r.destLat, r.destLng], {
+        icon: L.divIcon({
+          className: '',
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+          html: '<div style="font-size:26px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">🏁</div>'
+        })
+      }).addTo(map);
+    }
+    follow = false; notify('onFollowChanged', false);
+    map.fitBounds(routeLine.getBounds(), { paddingTopLeft:[30, 140], paddingBottomRight:[30, 260] });
+  };
+
+  window.setNavigatingMode = function (active, destLat, destLng) {
+    init(); if (!map) return;
+    isNavigatingMode = !!active;
+    if (isNavigatingMode) {
+      follow = true;
+      notify('onFollowChanged', true);
+      if (meMarker) {
+        map.setView(meMarker.getLatLng(), 17, { animate: true });
+      }
+      if (destLat && destLng && !destMarker) {
+        destMarker = L.marker([destLat, destLng], {
+          icon: L.divIcon({
+            className: '',
+            iconSize: [32, 32],
+            iconAnchor: [16, 32],
+            html: '<div style="font-size:26px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">🏁</div>'
+          })
+        }).addTo(map);
+      }
+    } else {
+      if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+    }
+  };
+
+  window.clearRoute = function () {
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+    isNavigatingMode = false;
+  };
+
+  init();
+</script>
+</body>
+</html>

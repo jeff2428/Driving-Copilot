@@ -1,0 +1,358 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		20ADFBCD57985802B4078CD9 /* RoadGuardApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151F44F51CE15B75926211D2 /* RoadGuardApp.swift */; };
+		516554E77DC3552DB3F56F35 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAC7634EA7E5FD184AA8E18 /* Models.swift */; };
+		7116A5EF6754549C8655AEC2 /* HsuehshanTunnelClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09AA9F328595528089936916 /* HsuehshanTunnelClient.swift */; };
+		DC5E9194C59F551683600F55 /* OpenDataRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC294CBDCB0508DA88909BB /* OpenDataRepository.swift */; };
+		BDCEA7BC777E571FB275E06B /* RoadGuardLocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FD894CF4F2A56DE871D77CF /* RoadGuardLocationManager.swift */; };
+		087FC19D99915B9392C1EA6D /* VoiceAlertEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57015F0F59145F929EE78480 /* VoiceAlertEngine.swift */; };
+		9C3948D76B6B5C8385BBBF14 /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E1F6D4B8D8355FEA5342D1E /* LiveActivityManager.swift */; };
+		5CAE599139E350318B50A2A3 /* RadarEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C1DE9AD35525DFEA9F1F7BA /* RadarEngine.swift */; };
+		6C527327757E5872A55E5057 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C75DC3671DA3587CA1359D01 /* MainView.swift */; };
+		1C8816AFFF11500488519B58 /* RadarMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A2C90C947851A5813AD55E /* RadarMapView.swift */; };
+		1330D84DF2F9535A80CDC2A0 /* HsuehshanCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7E9194B82DB5FA69F651ABE /* HsuehshanCardView.swift */; };
+		A70C4DF2E10E52A291B45041 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49F6B78A1D9C538F94B04B67 /* SettingsView.swift */; };
+		607B8E5012565A608F81D169 /* cloud_manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = D387C709ADA4520E8C2AFEB5 /* cloud_manifest.json */; };
+		E652C7DA1FF152868813AC72 /* leaflet.css in Resources */ = {isa = PBXBuildFile; fileRef = 705CD840B80357318FE1C1B5 /* leaflet.css */; };
+		E144B7E60C0254618982DDDE /* leaflet.js in Resources */ = {isa = PBXBuildFile; fileRef = 974759E7EA1856879CEDF92F /* leaflet.js */; };
+		9AA5D4C2AF6B52FDB8F4D646 /* radar_map.html in Resources */ = {isa = PBXBuildFile; fileRef = 54E8E43E407953928DC830E5 /* radar_map.html */; };
+		9F487B4810525DCAB694F57A /* taiwan_cameras_seed.csv in Resources */ = {isa = PBXBuildFile; fileRef = 7C869013423A50CCBBA1A782 /* taiwan_cameras_seed.csv */; };
+		BAA3F3C7D78B5D52A30FB650 /* taiwan_road_events_seed.json in Resources */ = {isa = PBXBuildFile; fileRef = 061B40C00D795F67BB2D4AAE /* taiwan_road_events_seed.json */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		43497EFDA4A35B83B7835A44 /* RoadGuard.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoadGuard.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		928D266C5CF45D6CB23DEE09 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		151F44F51CE15B75926211D2 /* RoadGuardApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadGuardApp.swift; sourceTree = "<group>"; };
+		CCAC7634EA7E5FD184AA8E18 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		09AA9F328595528089936916 /* HsuehshanTunnelClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HsuehshanTunnelClient.swift; sourceTree = "<group>"; };
+		5CC294CBDCB0508DA88909BB /* OpenDataRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenDataRepository.swift; sourceTree = "<group>"; };
+		1FD894CF4F2A56DE871D77CF /* RoadGuardLocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadGuardLocationManager.swift; sourceTree = "<group>"; };
+		57015F0F59145F929EE78480 /* VoiceAlertEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAlertEngine.swift; sourceTree = "<group>"; };
+		7E1F6D4B8D8355FEA5342D1E /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
+		6C1DE9AD35525DFEA9F1F7BA /* RadarEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadarEngine.swift; sourceTree = "<group>"; };
+		C75DC3671DA3587CA1359D01 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		E4A2C90C947851A5813AD55E /* RadarMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadarMapView.swift; sourceTree = "<group>"; };
+		E7E9194B82DB5FA69F651ABE /* HsuehshanCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HsuehshanCardView.swift; sourceTree = "<group>"; };
+		49F6B78A1D9C538F94B04B67 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		D387C709ADA4520E8C2AFEB5 /* cloud_manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = cloud_manifest.json; sourceTree = "<group>"; };
+		705CD840B80357318FE1C1B5 /* leaflet.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = leaflet.css; sourceTree = "<group>"; };
+		974759E7EA1856879CEDF92F /* leaflet.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = leaflet.js; sourceTree = "<group>"; };
+		54E8E43E407953928DC830E5 /* radar_map.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = radar_map.html; sourceTree = "<group>"; };
+		7C869013423A50CCBBA1A782 /* taiwan_cameras_seed.csv */ = {isa = PBXFileReference; lastKnownFileType = text; path = taiwan_cameras_seed.csv; sourceTree = "<group>"; };
+		061B40C00D795F67BB2D4AAE /* taiwan_road_events_seed.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = taiwan_road_events_seed.json; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A925E63F0928593FB86CA734 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		EE3C4F632EED562982235B54 = {
+			isa = PBXGroup;
+			children = (
+				B91B0C4A40315007BDABEB73 /* RoadGuard */,
+				6D62A6D8959257879A72194C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		6D62A6D8959257879A72194C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				43497EFDA4A35B83B7835A44 /* RoadGuard.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B91B0C4A40315007BDABEB73 /* RoadGuard */ = {
+			isa = PBXGroup;
+			children = (
+				4C71FE5A02245DECA8C53458 /* App */,
+				FDE5A1DE361E5D2F82D52165 /* Models */,
+				93CD5EBA5D555F8E84C3CEA9 /* Data */,
+				64F891EB051755029BDD29CB /* Services */,
+				4A1BEB6ED945542D94999D7A /* Views */,
+				903605C89A0E57A9AAD87C7C /* Resources */,
+				928D266C5CF45D6CB23DEE09 /* Info.plist */,
+			);
+			path = RoadGuard;
+			sourceTree = "<group>";
+		};
+		4C71FE5A02245DECA8C53458 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				151F44F51CE15B75926211D2 /* RoadGuardApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		FDE5A1DE361E5D2F82D52165 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				CCAC7634EA7E5FD184AA8E18 /* Models.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		93CD5EBA5D555F8E84C3CEA9 /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				09AA9F328595528089936916 /* HsuehshanTunnelClient.swift */,
+				5CC294CBDCB0508DA88909BB /* OpenDataRepository.swift */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
+		64F891EB051755029BDD29CB /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				1FD894CF4F2A56DE871D77CF /* RoadGuardLocationManager.swift */,
+				57015F0F59145F929EE78480 /* VoiceAlertEngine.swift */,
+				7E1F6D4B8D8355FEA5342D1E /* LiveActivityManager.swift */,
+				6C1DE9AD35525DFEA9F1F7BA /* RadarEngine.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		4A1BEB6ED945542D94999D7A /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				C75DC3671DA3587CA1359D01 /* MainView.swift */,
+				E4A2C90C947851A5813AD55E /* RadarMapView.swift */,
+				E7E9194B82DB5FA69F651ABE /* HsuehshanCardView.swift */,
+				49F6B78A1D9C538F94B04B67 /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		903605C89A0E57A9AAD87C7C /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				D387C709ADA4520E8C2AFEB5 /* cloud_manifest.json */,
+				705CD840B80357318FE1C1B5 /* leaflet.css */,
+				974759E7EA1856879CEDF92F /* leaflet.js */,
+				54E8E43E407953928DC830E5 /* radar_map.html */,
+				7C869013423A50CCBBA1A782 /* taiwan_cameras_seed.csv */,
+				061B40C00D795F67BB2D4AAE /* taiwan_road_events_seed.json */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		BF3397C8FCE1582A9AE0189B /* RoadGuard */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 045B4DCBC52457BFAA4C6B92 /* Build configuration list for PBXNativeTarget "RoadGuard" */;
+			buildPhases = (
+				3C329A81619C5A58876EC932 /* Sources */,
+				A925E63F0928593FB86CA734 /* Frameworks */,
+				1CA8B4268174590E9657A9E3 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RoadGuard;
+			productName = RoadGuard;
+			productReference = 43497EFDA4A35B83B7835A44 /* RoadGuard.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4B9BE16EC6BB514BB902338F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1520;
+				LastUpgradeCheck = 1520;
+				TargetAttributes = {
+					BF3397C8FCE1582A9AE0189B = {
+						CreatedOnToolsVersion = 15.2;
+					};
+				};
+			};
+			buildConfigurationList = 59A2E41B4D8B5C34982C382A /* Build configuration list for PBXProject "RoadGuard" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = EE3C4F632EED562982235B54;
+			productRefGroup = 6D62A6D8959257879A72194C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				BF3397C8FCE1582A9AE0189B /* RoadGuard */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1CA8B4268174590E9657A9E3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				607B8E5012565A608F81D169 /* cloud_manifest.json in Resources */,
+				E652C7DA1FF152868813AC72 /* leaflet.css in Resources */,
+				E144B7E60C0254618982DDDE /* leaflet.js in Resources */,
+				9AA5D4C2AF6B52FDB8F4D646 /* radar_map.html in Resources */,
+				9F487B4810525DCAB694F57A /* taiwan_cameras_seed.csv in Resources */,
+				BAA3F3C7D78B5D52A30FB650 /* taiwan_road_events_seed.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3C329A81619C5A58876EC932 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				20ADFBCD57985802B4078CD9 /* RoadGuardApp.swift in Sources */,
+				516554E77DC3552DB3F56F35 /* Models.swift in Sources */,
+				7116A5EF6754549C8655AEC2 /* HsuehshanTunnelClient.swift in Sources */,
+				DC5E9194C59F551683600F55 /* OpenDataRepository.swift in Sources */,
+				BDCEA7BC777E571FB275E06B /* RoadGuardLocationManager.swift in Sources */,
+				087FC19D99915B9392C1EA6D /* VoiceAlertEngine.swift in Sources */,
+				9C3948D76B6B5C8385BBBF14 /* LiveActivityManager.swift in Sources */,
+				5CAE599139E350318B50A2A3 /* RadarEngine.swift in Sources */,
+				6C527327757E5872A55E5057 /* MainView.swift in Sources */,
+				1C8816AFFF11500488519B58 /* RadarMapView.swift in Sources */,
+				1330D84DF2F9535A80CDC2A0 /* HsuehshanCardView.swift in Sources */,
+				A70C4DF2E10E52A291B45041 /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		82F96FADE5795CAA933440D3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		93491A6F962154F4B7C9181D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		2C2A74E011E95866B6727C1C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 19;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RoadGuard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 2.0.17;
+				PRODUCT_BUNDLE_IDENTIFIER = tw.roadguard.aegis;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F774850FAAB9549688FAA82D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 19;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RoadGuard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 2.0.17;
+				PRODUCT_BUNDLE_IDENTIFIER = tw.roadguard.aegis;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		59A2E41B4D8B5C34982C382A /* Build configuration list for PBXProject "RoadGuard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				82F96FADE5795CAA933440D3 /* Debug */,
+				93491A6F962154F4B7C9181D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		045B4DCBC52457BFAA4C6B92 /* Build configuration list for PBXNativeTarget "RoadGuard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2C2A74E011E95866B6727C1C /* Debug */,
+				F774850FAAB9549688FAA82D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = 4B9BE16EC6BB514BB902338F /* Project object */;
+}

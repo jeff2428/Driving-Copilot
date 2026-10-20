@@ -103,7 +103,11 @@ def run():
                 f"  • 依道路速限與車速動態調整兩階段語音預警距離 (高速 900m/380m、中速 600m/260m、市區 420m/180m)\n"
                 f"- 🚇 雪山隧道進洞後自動停止提醒：\n"
                 f"  • 新增洞口前向方位角判定與雪隧內部走廊區間鎖定\n"
-                f"  • 進洞前提醒完畢、一旦駛入洞口後立即關閉車道建議，不再於隧道內重複提醒，並 100% 交由雪隧內科技執法測速雷達接手"
+                f"  • 進洞前提醒完畢、一旦駛入洞口後立即關閉車道建議，不再於隧道內重複提醒，並 100% 交由雪隧內科技執法測速雷達接手\n"
+                f"- 🍎 同步推出 iOS 原生版本 (Swift + SwiftUI)：\n"
+                f"  • 支援即時動態與動態島 (Live Activities & Dynamic Island)，鎖定畫面與導航時無縫懸浮預警\n"
+                f"  • 支援背景音訊自動壓低 (Audio Ducking) 與背景持續定位，播報時音樂自動降音\n"
+                f"  • GitHub Actions 雲端自動編譯打包 RoadGuard-Aegis.ipa，支援 AltStore / Sideloadly 一鍵安裝"
             )
         ]
         rel_res = subprocess.run(release_cmd, cwd=str(BASE_DIR))
@@ -117,9 +121,11 @@ def run():
 
     print("\n" + "=" * 65)
     print(f"🎉 新版本 v{vname} (Code: {vcode}) 發布流程已全部完成！")
-    print(f"📦 本機安裝包：{dst1.name}")
+    print(f"📦 Android 安裝包：{dst1.name}")
+    print(f"🍎 iOS 雲端打包：https://github.com/jeff2428/Driving-Copilot/actions/workflows/build_ios.yml")
     print(f"🌐 雲端版本檔：https://raw.githubusercontent.com/jeff2428/Driving-Copilot/main/cloud_data/app_version.json")
-    print(f"📥 雲端下載點：https://github.com/jeff2428/Driving-Copilot/releases/latest/download/TW-RoadGuard-Aegis.apk")
+    print(f"📥 Android 下載點：https://github.com/jeff2428/Driving-Copilot/releases/latest/download/TW-RoadGuard-Aegis.apk")
+    print(f"📥 iOS IPA 下載點：https://github.com/jeff2428/Driving-Copilot/releases/latest/download/RoadGuard-Aegis.ipa")
     print("💡 所有已安裝舊版的車主，開啟 App 將會立即跳出「發現新版本」全螢幕更新提醒！")
     print("=" * 65)
     return True
