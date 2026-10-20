@@ -48,6 +48,7 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
     // 紀錄已播報過的階段 (1=遠距初報, 2=近距提醒)
     private val announcedEventStages = ConcurrentHashMap<String, Int>()
     private val announcedCameraStages = ConcurrentHashMap<String, Int>()
+    private val lastCameraDistances = ConcurrentHashMap<String, Double>()
     private var announcedTunnelDirection: String? = null
     private var lastOverspeedBeepTime = 0L
 
@@ -131,15 +132,27 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
     }
 
     /**
-     * 神盾測速照相兩階段語音預警
+     * 神盾測速照相兩階段語音預警（依道路速限與車速動態調整預警距離，並檢查是否正在接近中）
      */
     fun checkAndAnnounceCamera(camera: SpeedCamera, distanceMeters: Double, currentSpeedKmh: Int) {
         if (!isVoiceEnabled) return
         if (camera.type == CameraType.HOTSPOT && !isHotspotAlertEnabled) return
-        val distInt = (distanceMeters / 50).toInt() * 50
+
+        val prevDist = lastCameraDistances.put(camera.id, distanceMeters)
+        // 若距離明顯正在拉遠 (> 6 公尺)，代表並非接近中，不觸發新語音階段
+        val isMovingAway = prevDist != null && distanceMeters > prevDist + 6.0
+        if (isMovingAway) return
+
+        val (stage1Dist, stage2Dist, overspeedBeepDist) = when {
+            camera.speedLimit >= 80 || currentSpeedKmh >= 80 -> Triple(900.0, 380.0, 550.0)
+            camera.speedLimit >= 60 || currentSpeedKmh >= 60 -> Triple(600.0, 260.0, 400.0)
+            else -> Triple(420.0, 180.0, 280.0)
+        }
+
+        val distInt = ((distanceMeters / 50).toInt() * 50).coerceAtLeast(50)
         val stage = when {
-            distanceMeters <= 380.0 -> 2
-            distanceMeters <= 950.0 -> 1
+            distanceMeters <= stage2Dist -> 2
+            distanceMeters <= stage1Dist -> 1
             else -> 0
         }
         if (stage == 0) return
@@ -173,10 +186,10 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
             speakNow(msg, urgentTone = isOver)
         }
 
-        // 若持續超速且距離在 550m 內，每 4.5 秒發出神盾急促超速音
+        // 若持續超速且在近距離內，每 4.5 秒發出神盾急促超速音
         val now = System.currentTimeMillis()
         if (currentSpeedKmh > (camera.speedLimit + overspeedToleranceKmh) &&
-            distanceMeters <= 550.0 &&
+            distanceMeters <= overspeedBeepDist &&
             now - lastOverspeedBeepTime > 4500L
         ) {
             lastOverspeedBeepTime = now
@@ -207,8 +220,8 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
     fun checkAndAnnounceRoadEvent(event: RoadEvent, distanceMeters: Double) {
         if (!isVoiceEnabled || event.isCleared || !event.isActiveNow) return
         val stage = when {
-            distanceMeters <= 600.0 -> 2
-            distanceMeters <= 2000.0 -> 1
+            distanceMeters <= 550.0 -> 2
+            distanceMeters <= 1800.0 -> 1
             else -> 0
         }
         if (stage == 0) return
@@ -281,6 +294,8 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         announceHsuehshanTunnel(advice)
     }
 
+    fun hasAnnouncedTunnel(direction: String): Boolean = announcedTunnelDirection == direction
+
     fun resetTunnelAnnounced() {
         announcedTunnelDirection = null
     }
@@ -288,6 +303,7 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
     fun resetMemory() {
         announcedCameraStages.clear()
         announcedEventStages.clear()
+        lastCameraDistances.clear()
         resetTunnelAnnounced()
     }
 

@@ -84,7 +84,11 @@ object HsuehshanTunnelClient {
     /**
      * 取得指定行向 (S=南下往宜蘭, N=北上往台北) 的雪隧即時車道建議
      */
-    fun getAdvice(direction: String, distanceMeters: Double): HsuehshanAdvice {
+    fun getAdvice(
+        direction: String,
+        distanceMeters: Double,
+        isApproaching: Boolean = distanceMeters in 350.0..2500.0
+    ): HsuehshanAdvice {
         val dirKey = if (direction.equals("N", ignoreCase = true)) "N" else "S"
         val dirLabel = if (dirKey == "N") "北上 (往台北)" else "南下 (往宜蘭)"
         val towards = if (dirKey == "N") "往台北" else "往宜蘭"
@@ -113,13 +117,13 @@ object HsuehshanTunnelClient {
                 outerTravelMin = null,
                 tunnelTravelMin = 9.0,
                 alertEvent = null,
-                isApproachingEntrance = distanceMeters in 300.0..2500.0,
+                isApproachingEntrance = isApproaching,
                 dataTime = "--:--"
             )
         }
 
         try {
-            val dirObj = root.optJSONObject(dirKey) ?: return fallbackAdvice(dirKey, dirLabel, towards, distanceMeters)
+            val dirObj = root.optJSONObject(dirKey) ?: return fallbackAdvice(dirKey, dirLabel, towards, distanceMeters, isApproaching)
             val recObj = dirObj.optJSONObject("recommend")
             val innerObj = dirObj.optJSONObject("inner")
             val outerObj = dirObj.optJSONObject("outer")
@@ -179,16 +183,22 @@ object HsuehshanTunnelClient {
                 outerTravelMin = outerMin,
                 tunnelTravelMin = travelMin,
                 alertEvent = alertEvent,
-                isApproachingEntrance = distanceMeters in 300.0..2500.0,
+                isApproachingEntrance = isApproaching,
                 dataTime = dataTime
             )
         } catch (e: Exception) {
             e.printStackTrace()
-            return fallbackAdvice(dirKey, dirLabel, towards, distanceMeters)
+            return fallbackAdvice(dirKey, dirLabel, towards, distanceMeters, isApproaching)
         }
     }
 
-    private fun fallbackAdvice(dirKey: String, dirLabel: String, towards: String, distanceMeters: Double): HsuehshanAdvice {
+    private fun fallbackAdvice(
+        dirKey: String,
+        dirLabel: String,
+        towards: String,
+        distanceMeters: Double,
+        isApproaching: Boolean = distanceMeters in 350.0..2500.0
+    ): HsuehshanAdvice {
         return HsuehshanAdvice(
             direction = dirKey,
             directionLabel = dirLabel,
@@ -205,7 +215,7 @@ object HsuehshanTunnelClient {
             outerTravelMin = null,
             tunnelTravelMin = 8.5,
             alertEvent = null,
-            isApproachingEntrance = distanceMeters in 300.0..2500.0,
+            isApproachingEntrance = isApproaching,
             dataTime = "--:--"
         )
     }

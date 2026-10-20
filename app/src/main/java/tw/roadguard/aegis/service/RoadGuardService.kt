@@ -30,6 +30,7 @@ import tw.roadguard.aegis.ads.AdRevenueManager
 import tw.roadguard.aegis.data.TaiwanOpenDataRepository
 import tw.roadguard.aegis.model.*
 import tw.roadguard.aegis.ui.MainActivity
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -194,10 +195,16 @@ class RoadGuardService : Service(), LocationListener {
     var currentLng: Double = 120.6311
     var currentSpeedKmh: Int = 0
     var currentBearingDeg: Float = 0f
+    private var hasValidBearing: Boolean = false
+    private var lastAccurateFixTime: Long = 0L
 
-    // 追蹤上一支接近中的測速桿，用於判斷「通過測速桿」播放叮咚解除音
+    // 追蹤上一支接近中的測速桿，用於判斷「通過測速桿」播放叮咚解除音並防止回頭誤報
     private var approachingCameraId: String? = null
     private var approachingCameraMinDist: Double = Double.MAX_VALUE
+    private val passedCameraCooldownMap = ConcurrentHashMap<String, Long>()
+
+    // 追蹤雪山隧道進洞提醒是否已完成並進洞（進洞後不再顯示或播報車道建議）
+    private var completedTunnelApproachDir: String? = null
 
     // 區間測速累計狀態
     private var intervalStartTimestamp: Long = 0L
@@ -327,7 +334,7 @@ class RoadGuardService : Service(), LocationListener {
     fun startGpsTracking() {
         try {
             if (locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true) {
-                locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 2f, this)
+                locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 500L, 1f, this)
             }
             if (locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true) {
                 locationManager?.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 2000L, 5f, this)
@@ -344,6 +351,15 @@ class RoadGuardService : Service(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         if (isSimulating) return
+        val now = System.currentTimeMillis()
+        // 過濾精度過差之基地台漂移點 (當已有近期高精度 GPS 點時)
+        if (location.hasAccuracy() && location.accuracy > 55f && (now - lastAccurateFixTime < 10_000L)) {
+            return
+        }
+        if (!location.hasAccuracy() || location.accuracy <= 35f) {
+            lastAccurateFixTime = now
+        }
+
         val prevLat = currentLat
         val prevLng = currentLng
         currentLat = location.latitude
@@ -353,13 +369,17 @@ class RoadGuardService : Service(), LocationListener {
         } else {
             0
         }
-        currentBearingDeg = if (location.hasBearing() && location.bearing != 0f) {
-            location.bearing
-        } else if (GeoUtils.distanceMeters(prevLat, prevLng, currentLat, currentLng) > 4.0) {
-            GeoUtils.bearingDeg(prevLat, prevLng, currentLat, currentLng).toFloat()
-        } else {
-            currentBearingDeg
+
+        val movedDist = GeoUtils.distanceMeters(prevLat, prevLng, currentLat, currentLng)
+        if (location.hasBearing() && location.bearing != 0f && currentSpeedKmh >= 4) {
+            currentBearingDeg = location.bearing
+            hasValidBearing = true
+        } else if (movedDist >= 5.0 && currentSpeedKmh >= 5) {
+            currentBearingDeg = GeoUtils.bearingDeg(prevLat, prevLng, currentLat, currentLng).toFloat()
+            hasValidBearing = true
         }
+        // 低速或停等紅燈時保留最後有效車頭方向，避免方向歸零或亂跳抓到後方測速桿
+
         navEngine.updateLocation(currentLat, currentLng, currentSpeedKmh.toDouble(), currentBearingDeg.toDouble())
         recomputeRadarState()
     }
@@ -374,12 +394,15 @@ class RoadGuardService : Service(), LocationListener {
      */
     fun startDemoSimulation(scenarioIdx: Int = 0) {
         isDrivingActive = true
-        simScenarioIndex = scenarioIdx % 4
+        simScenarioIndex = scenarioIdx % 6
         simStep = 0
         isSimulating = true
+        hasValidBearing = true
         voiceEngine.resetMemory()
         approachingCameraId = null
         approachingCameraMinDist = Double.MAX_VALUE
+        passedCameraCooldownMap.clear()
+        completedTunnelApproachDir = null
 
         when (simScenarioIndex) {
             0 -> {
@@ -439,31 +462,31 @@ class RoadGuardService : Service(), LocationListener {
                 )
             }
             4 -> {
-                simRouteName = "模擬路線 5：國道5號南下 14K (即將進入雪隧南下 15.2K 坪林入口・車道建議)"
-                currentLat = 24.9450
-                currentLng = 121.7050
+                simRouteName = "模擬路線 5：國道5號南下 14.5K (進雪隧前車道建議 ➔ 進洞後自動停止並切換雪隧科技執法)"
+                currentLat = 24.9415
+                currentLng = 121.7090
                 currentBearingDeg = 135f // 往東南行駛
-                currentSpeedKmh = 82
+                currentSpeedKmh = 85
                 ensureDemoTargetsExist(
-                    camLat = 24.9365, camLng = 121.7142, limit = 90, camType = CameraType.TECH,
-                    camAddr = "國道五號南下 15.2K 雪山隧道坪林端入口",
-                    evLat = 24.9365, evLng = 121.7142, isClosure = false,
-                    evRoad = "國道5號雪山隧道南下入口",
-                    evDesc = "進入雪隧前即時車流分析：建議選定車道，隧道內雙白線禁止變換車道"
+                    camLat = 24.9330, camLng = 121.7177, limit = 90, camType = CameraType.TECH,
+                    camAddr = "國道五號南向15.8公里(雪山隧道內科技執法)",
+                    evLat = 24.9295, evLng = 121.7212, isClosure = false,
+                    evRoad = "國道5號雪山隧道南下",
+                    evDesc = "雪山隧道內雙白線禁止變換車道，請保持安全車距"
                 )
             }
             else -> {
-                simRouteName = "模擬路線 6：國道5號北上 29.5K (即將進入雪隧北上 28.1K 頭城入口・車道建議)"
-                currentLat = 24.8390
-                currentLng = 121.8080
-                currentBearingDeg = 320f // 往西北行駛
-                currentSpeedKmh = 80
+                simRouteName = "模擬路線 6：國道5號北上 28.8K (進雪隧前車道建議 ➔ 進洞後自動停止並切換雪隧科技執法)"
+                currentLat = 24.8458
+                currentLng = 121.8015
+                currentBearingDeg = 318f // 往西北行駛
+                currentSpeedKmh = 84
                 ensureDemoTargetsExist(
-                    camLat = 24.8512, camLng = 121.7960, limit = 90, camType = CameraType.TECH,
-                    camAddr = "國道五號北上 28.1K 雪山隧道頭城端入口",
-                    evLat = 24.8512, evLng = 121.7960, isClosure = false,
-                    evRoad = "國道5號雪山隧道北上入口",
-                    evDesc = "進入雪隧前即時車流分析：建議選定車道，隧道內雙白線禁止變換車道"
+                    camLat = 24.8548, camLng = 121.7924, limit = 90, camType = CameraType.TECH,
+                    camAddr = "國道五號北向27.5公里(雪山隧道內科技執法)",
+                    evLat = 24.8580, evLng = 121.7892, isClosure = false,
+                    evRoad = "國道5號雪山隧道北上",
+                    evDesc = "雪山隧道內雙白線禁止變換車道，請保持安全車距"
                 )
             }
         }
@@ -488,6 +511,12 @@ class RoadGuardService : Service(), LocationListener {
         repository.cameras.removeAll { it.id.startsWith("SIM-") }
         repository.roadEvents.removeAll { it.uid.startsWith("SIM-") }
 
+        val dirStr = when {
+            currentBearingDeg in 300f..360f || currentBearingDeg in 0f..60f -> "往北"
+            currentBearingDeg in 120f..240f -> "往南"
+            else -> "雙向"
+        }
+
         repository.cameras.add(
             0,
             SpeedCamera(
@@ -498,7 +527,7 @@ class RoadGuardService : Service(), LocationListener {
                 dept = "警政署測速資料",
                 lat = camLat,
                 lng = camLng,
-                directText = "雙向",
+                directText = dirStr,
                 speedLimit = limit,
                 type = camType
             )
@@ -511,7 +540,7 @@ class RoadGuardService : Service(), LocationListener {
                 uid = "SIM-EV-$simScenarioIndex",
                 roadName = evRoad,
                 areaName = evRoad,
-                direction = if (currentBearingDeg == 0f) "北上" else "南下",
+                direction = dirStr,
                 lat = evLat,
                 lng = evLng,
                 rawComment = evDesc,
@@ -548,55 +577,142 @@ class RoadGuardService : Service(), LocationListener {
         recomputeRadarState()
     }
 
+    private fun minDistanceToPolyline(lat: Double, lng: Double, points: List<Pair<Double, Double>>): Double {
+        if (points.size < 2) return 0.0
+        var minD = Double.MAX_VALUE
+        for (i in 0 until points.size - 1) {
+            val a = points[i]
+            val b = points[i + 1]
+            val d = GeoUtils.pointToSegmentMeters(lat, lng, a.first, a.second, b.first, b.second)
+            if (d < minD) minD = d
+        }
+        return minD
+    }
+
     /**
      * 核心雙雷達運算：找出車頭前方最近的「測速照相」與「施工/封閉事件」並驅動語音與懸浮窗
      */
     fun recomputeRadarState() {
-        val dynamicCamRadius = when {
-            currentSpeedKmh >= 90 -> 1300.0
-            currentSpeedKmh >= 60 -> 900.0
-            else -> 650.0
-        }
-        val dynamicEventRadius = when {
-            currentSpeedKmh >= 90 -> 3200.0
-            currentSpeedKmh >= 60 -> 2200.0
-            else -> alertRadiusMeters
+        val now = System.currentTimeMillis()
+        val canAlert = isDrivingActive || isSimulating || navEngine.isNavigating
+        val activeNavRoutePoints = if (navEngine.isNavigating) navEngine.activeRoute?.routePoints else null
+        val insideHsuehshan = GeoUtils.isInsideHsuehshanTunnel(currentLat, currentLng)
+
+        // 清理過期的已通過測速桿冷卻紀錄 (65 秒後釋放)
+        passedCameraCooldownMap.entries.removeIf { now - it.value > 65_000L }
+
+        // 1. 檢查上一支正在接近中的測速桿是否已經「通過車身」(距離曾 <= 220m 且角度已轉至側後方 > 72° 或距離開始明顯拉遠)
+        if (approachingCameraId != null) {
+            val trackedCam = repository.cameras.firstOrNull { it.id == approachingCameraId }
+            if (trackedCam != null) {
+                val curDist = GeoUtils.distanceMeters(currentLat, currentLng, trackedCam.lat, trackedCam.lng)
+                val curBearing = GeoUtils.bearingDeg(currentLat, currentLng, trackedCam.lat, trackedCam.lng)
+                val curRelAngle = GeoUtils.angleDiff(currentBearingDeg.toDouble(), curBearing)
+
+                val passedByAngle = approachingCameraMinDist <= 220.0 && curRelAngle > 72.0
+                val passedByDistIncrease = approachingCameraMinDist <= 140.0 && curDist > approachingCameraMinDist + 16.0
+
+                if (passedByAngle || passedByDistIncrease) {
+                    if (canAlert) {
+                        voiceEngine.playCameraPassedChime()
+                    }
+                    passedCameraCooldownMap[trackedCam.id] = now
+                    approachingCameraId = null
+                    approachingCameraMinDist = Double.MAX_VALUE
+                }
+            } else {
+                approachingCameraId = null
+                approachingCameraMinDist = Double.MAX_VALUE
+            }
         }
 
+        // 2. 篩選車頭正前方走廊內的候選測速照相
+        val useDirectionalFilter = forwardConeOnly && (hasValidBearing || currentSpeedKmh > 3 || isSimulating || navEngine.isNavigating)
         val candidateCameras = ArrayList<ScoredCamera>()
+
         for (cam in repository.cameras) {
             if (cam.type == CameraType.HOTSPOT && !voiceEngine.isHotspotAlertEnabled) continue
+            if (passedCameraCooldownMap.containsKey(cam.id)) continue
 
             val dLat = kotlin.math.abs(cam.lat - currentLat)
             val dLng = kotlin.math.abs(cam.lng - currentLng)
-            if (dLat > 0.04 || dLng > 0.04) continue
+            if (dLat > 0.035 || dLng > 0.035) continue
 
             val dist = GeoUtils.distanceMeters(currentLat, currentLng, cam.lat, cam.lng)
-            if (dist > 3500.0) continue
+            if (dist > 3000.0) continue
 
             val targetBearing = GeoUtils.bearingDeg(currentLat, currentLng, cam.lat, cam.lng)
             val relAngle = GeoUtils.angleDiff(currentBearingDeg.toDouble(), targetBearing)
+            val crossTrack = GeoUtils.crossTrackDistanceMeters(dist, relAngle)
 
-            val isAhead = if (forwardConeOnly && (currentSpeedKmh > 10 || isSimulating)) {
-                relAngle <= 68.0 && GeoUtils.isDirectionCompatible(currentBearingDeg, cam.directText)
-            } else {
-                true
+            // 國道/快速道路 vs 一般平面道路 車速與道路等級智慧分流 (避免橋上抓橋下、橋下抓橋上)
+            val isFreewayCam = cam.address.contains("國道") || cam.address.contains("高架") ||
+                    cam.address.contains("快速") || cam.speedLimit >= 80
+            val isRampCam = cam.address.contains("匝道") || cam.address.contains("出口") ||
+                    cam.address.contains("入口") || cam.address.contains("交流道")
+
+            if (currentSpeedKmh >= 82 && cam.speedLimit <= 50 && !isFreewayCam && !isRampCam) {
+                // 高速行駛於國道/快速道路時，排除橋下速限 <= 50 之市區平面測速桿
+                continue
             }
-            if (isAhead) {
-                candidateCameras.add(ScoredCamera(cam, dist, relAngle))
+            if (!isSimulating && !insideHsuehshan && currentSpeedKmh in 1..48 &&
+                cam.speedLimit >= 100 && cam.address.contains("國道") && !isRampCam &&
+                approachingCameraId != cam.id
+            ) {
+                // 低速行駛於平面道路時，排除國道主線速限 >= 100 之測速桿
+                continue
             }
+
+            if (useDirectionalFilter) {
+                // (A) 嚴格比對測速桿地址與拍攝方向
+                if (!GeoUtils.isCameraDirectionCompatible(currentBearingDeg, cam.address, cam.directText)) {
+                    continue
+                }
+                // (B) 前向錐形角度與橫向偏距走廊 (Cross-Track Corridor) 過濾，剔除隔壁平行道路
+                val maxConeAngle = when {
+                    dist <= 350.0 -> 35.0
+                    dist <= 750.0 -> 40.0
+                    else -> 45.0
+                }
+                val maxCrossTrack = when {
+                    dist <= 350.0 -> 48.0
+                    dist <= 750.0 -> 75.0
+                    else -> 105.0
+                }
+                if (relAngle > maxConeAngle || crossTrack > maxCrossTrack) {
+                    continue
+                }
+                // (C) 若正在進行軟體內建導航，確保測速桿位於導航路線走廊 (45m) 內
+                if (!activeNavRoutePoints.isNullOrEmpty() && dist <= 1500.0) {
+                    val distToRoute = minDistanceToPolyline(cam.lat, cam.lng, activeNavRoutePoints)
+                    if (distToRoute > 45.0) continue
+                }
+            }
+
+            candidateCameras.add(ScoredCamera(cam, dist, relAngle))
         }
-        candidateCameras.sortBy { it.distanceMeters }
 
-        val nearestCam = candidateCameras.firstOrNull { it.distanceMeters <= dynamicCamRadius }
+        // 依「前向距離 + 橫向偏距權重」排序，優先鎖定正前方車道上的測速桿
+        candidateCameras.sortBy {
+            it.distanceMeters + GeoUtils.crossTrackDistanceMeters(it.distanceMeters, it.relativeAngleDeg) * 1.8
+        }
 
-        val canAlert = isDrivingActive || isSimulating || navEngine.isNavigating
+        // 依測速桿速限與目前車速決定有效鎖定半徑（避免市區 40km/h 測速桿在 1 公里外過早鎖定）
+        val nearestCam = candidateCameras.firstOrNull { sc ->
+            val maxLockRadius = when {
+                sc.camera.speedLimit >= 80 || currentSpeedKmh >= 82 -> 1150.0
+                sc.camera.speedLimit >= 60 || currentSpeedKmh >= 58 -> 750.0
+                else -> 500.0
+            }
+            sc.distanceMeters <= maxLockRadius
+        }
 
-        // 檢查是否剛剛通過上一支測速桿 -> 播放神盾「叮咚」解除音
+        // 若原本鎖定的測速桿已不在前方且曾接近至 <= 220m，觸發通過叮咚音並加入冷卻
         if (canAlert && approachingCameraId != null) {
             val stillSame = nearestCam?.camera?.id == approachingCameraId
-            if (!stillSame && approachingCameraMinDist <= 260.0) {
+            if (!stillSame && approachingCameraMinDist <= 220.0) {
                 voiceEngine.playCameraPassedChime()
+                passedCameraCooldownMap[approachingCameraId!!] = now
                 approachingCameraId = null
                 approachingCameraMinDist = Double.MAX_VALUE
             }
@@ -631,7 +747,13 @@ class RoadGuardService : Service(), LocationListener {
             ((nearestCam.distanceMeters / ((nearestCam.camera.speedLimit / 3.6).coerceAtLeast(10.0)))).roundToInt()
         } else 0
 
-        // 掃描前方施工、封閉與路況事件
+        // 3. 掃描前方施工、封閉與路況事件
+        val dynamicEventRadius = when {
+            currentSpeedKmh >= 85 -> 2800.0
+            currentSpeedKmh >= 60 -> 1800.0
+            else -> 1200.0
+        }
+
         val candidateEvents = ArrayList<ScoredRoadEvent>()
         var activeTotal = 0
         for (ev in repository.roadEvents) {
@@ -642,28 +764,42 @@ class RoadGuardService : Service(), LocationListener {
 
             val targetBearing = GeoUtils.bearingDeg(currentLat, currentLng, ev.lat, ev.lng)
             val relAngle = GeoUtils.angleDiff(currentBearingDeg.toDouble(), targetBearing)
+            val crossTrack = GeoUtils.crossTrackDistanceMeters(dist, relAngle)
 
-            val isAhead = if (forwardConeOnly && (currentSpeedKmh > 10 || isSimulating)) {
-                relAngle <= 72.0 && GeoUtils.isDirectionCompatible(currentBearingDeg, ev.direction)
+            val isAheadInCorridor = if (useDirectionalFilter) {
+                relAngle <= 48.0 &&
+                        crossTrack <= 95.0 &&
+                        GeoUtils.isDirectionCompatible(currentBearingDeg, ev.direction) &&
+                        (activeNavRoutePoints.isNullOrEmpty() || minDistanceToPolyline(ev.lat, ev.lng, activeNavRoutePoints) <= 75.0)
             } else {
-                true
+                relAngle <= 65.0
             }
-            if (isAhead || dist <= 5000.0) {
+
+            if (isAheadInCorridor || dist <= 5000.0) {
                 candidateEvents.add(ScoredRoadEvent(ev, dist, relAngle))
             }
         }
 
-        // 前方預警優先挑選：距離在預警半徑內且正在生效的「封閉管制」或「道路施工」
+        // 前方預警優先挑選：距離在預警半徑內、位於車頭前方走廊且正在生效的「封閉管制」或「道路施工」
         candidateEvents.sortWith(
             compareBy<ScoredRoadEvent> { it.distanceMeters > dynamicEventRadius }
-                .thenBy { if (forwardConeOnly) it.relativeAngleDeg > 72.0 else false }
+                .thenBy {
+                    if (useDirectionalFilter) {
+                        it.relativeAngleDeg > 48.0 || GeoUtils.crossTrackDistanceMeters(it.distanceMeters, it.relativeAngleDeg) > 95.0
+                    } else false
+                }
                 .thenBy { it.event.severity.priority }
                 .thenBy { it.distanceMeters }
         )
 
-        val alertEvent = candidateEvents.firstOrNull {
-            it.distanceMeters <= dynamicEventRadius &&
-                    (!forwardConeOnly || it.relativeAngleDeg <= 72.0 || currentSpeedKmh <= 10)
+        val alertEvent = candidateEvents.firstOrNull { se ->
+            val crossTrack = GeoUtils.crossTrackDistanceMeters(se.distanceMeters, se.relativeAngleDeg)
+            val inRoute = activeNavRoutePoints.isNullOrEmpty() ||
+                    minDistanceToPolyline(se.event.lat, se.event.lng, activeNavRoutePoints) <= 75.0
+            se.distanceMeters <= dynamicEventRadius &&
+                    se.event.isActiveNow &&
+                    inRoute &&
+                    (!useDirectionalFilter || (se.relativeAngleDeg <= 48.0 && crossTrack <= 95.0 && GeoUtils.isDirectionCompatible(currentBearingDeg, se.event.direction)))
         }
         if (canAlert && alertEvent != null) {
             voiceEngine.checkAndAnnounceRoadEvent(alertEvent.event, alertEvent.distanceMeters)
@@ -672,26 +808,60 @@ class RoadGuardService : Service(), LocationListener {
         val isOverspeed = nearestCam != null &&
                 currentSpeedKmh > (nearestCam.camera.speedLimit + voiceEngine.overspeedToleranceKmh)
 
-        // 國道5號 雪山隧道進洞前車道即時建議 (南下坪林端 15.2K / 北上頭城端 28.1K)
+        // 4. 國道5號 雪山隧道進洞前車道即時建議 (南下坪林端 15.2K / 北上頭城端 28.1K)
+        // 核心原則：只在「進入洞口前」提醒；一旦進洞前提醒完並進入隧道 (或洞口已在車身後方)，立即停止提醒，完全交由隧道內測速雷達接手！
         val distToSouthEntrance = GeoUtils.distanceMeters(currentLat, currentLng, HSUEHSHAN_SOUTH_ENTRANCE_LAT, HSUEHSHAN_SOUTH_ENTRANCE_LNG)
         val distToNorthEntrance = GeoUtils.distanceMeters(currentLat, currentLng, HSUEHSHAN_NORTH_ENTRANCE_LAT, HSUEHSHAN_NORTH_ENTRANCE_LNG)
 
-        val tunnelAdvice: HsuehshanAdvice? = when {
-            distToSouthEntrance <= 3500.0 && GeoUtils.angleDiff(currentBearingDeg.toDouble(), 135.0) <= 75.0 -> {
-                // 南下接近中 (往宜蘭方向，航向朝東南)
-                tw.roadguard.aegis.data.HsuehshanTunnelClient.getAdvice("S", distToSouthEntrance)
+        // 計算車頭對準洞口的方位角，確保洞口在「車頭正前方」而非已經通過在「車尾後方」
+        val bearingToSouthEntrance = GeoUtils.bearingDeg(currentLat, currentLng, HSUEHSHAN_SOUTH_ENTRANCE_LAT, HSUEHSHAN_SOUTH_ENTRANCE_LNG)
+        val bearingToNorthEntrance = GeoUtils.bearingDeg(currentLat, currentLng, HSUEHSHAN_NORTH_ENTRANCE_LAT, HSUEHSHAN_NORTH_ENTRANCE_LNG)
+        val angleToSouthEntrance = GeoUtils.angleDiff(currentBearingDeg.toDouble(), bearingToSouthEntrance)
+        val angleToNorthEntrance = GeoUtils.angleDiff(currentBearingDeg.toDouble(), bearingToNorthEntrance)
+
+        // 若已進入隧道內部，或已經通過洞口 (距離 < 320m 或洞口轉至車尾 > 70°)，鎖定該方向已完成提醒
+        if (insideHsuehshan) {
+            completedTunnelApproachDir = if (GeoUtils.angleDiff(currentBearingDeg.toDouble(), 138.0) <= 90.0) "S" else "N"
+        } else {
+            if (voiceEngine.hasAnnouncedTunnel("S") && (distToSouthEntrance < 320.0 || angleToSouthEntrance > 65.0)) {
+                completedTunnelApproachDir = "S"
             }
-            distToNorthEntrance <= 3500.0 && (GeoUtils.angleDiff(currentBearingDeg.toDouble(), 320.0) <= 75.0 || GeoUtils.angleDiff(currentBearingDeg.toDouble(), 350.0) <= 75.0) -> {
-                // 北上接近中 (往台北方向，航向朝西北)
-                tw.roadguard.aegis.data.HsuehshanTunnelClient.getAdvice("N", distToNorthEntrance)
+            if (voiceEngine.hasAnnouncedTunnel("N") && (distToNorthEntrance < 320.0 || angleToNorthEntrance > 65.0)) {
+                completedTunnelApproachDir = "N"
+            }
+        }
+
+        // 當完全駛離雪山隧道兩端洞口 (> 4500m 且不在隧道內)，才重置進洞提醒記憶
+        if (!insideHsuehshan && distToSouthEntrance > 4500.0 && distToNorthEntrance > 4500.0) {
+            completedTunnelApproachDir = null
+            voiceEngine.resetTunnelAnnounced()
+        }
+
+        val isApproachingSouth = !insideHsuehshan &&
+                completedTunnelApproachDir != "S" &&
+                distToSouthEntrance in 320.0..2500.0 &&
+                angleToSouthEntrance <= 48.0 &&
+                GeoUtils.angleDiff(currentBearingDeg.toDouble(), 138.0) <= 55.0
+
+        val isApproachingNorth = !insideHsuehshan &&
+                completedTunnelApproachDir != "N" &&
+                distToNorthEntrance in 320.0..2500.0 &&
+                angleToNorthEntrance <= 48.0 &&
+                (GeoUtils.angleDiff(currentBearingDeg.toDouble(), 320.0) <= 55.0 ||
+                        GeoUtils.angleDiff(currentBearingDeg.toDouble(), 345.0) <= 50.0)
+
+        val tunnelAdvice: HsuehshanAdvice? = when {
+            isApproachingSouth -> {
+                tw.roadguard.aegis.data.HsuehshanTunnelClient.getAdvice("S", distToSouthEntrance, isApproaching = true)
+            }
+            isApproachingNorth -> {
+                tw.roadguard.aegis.data.HsuehshanTunnelClient.getAdvice("N", distToNorthEntrance, isApproaching = true)
             }
             else -> null
         }
 
         if (canAlert && tunnelAdvice != null && tunnelAdvice.isApproachingEntrance) {
             voiceEngine.checkAndAnnounceHsuehshanTunnel(tunnelAdvice)
-        } else if (distToSouthEntrance > 4000.0 && distToNorthEntrance > 4000.0) {
-            voiceEngine.resetTunnelAnnounced()
         }
 
         val snapshot = RadarSnapshot(
@@ -1089,6 +1259,7 @@ class RoadGuardService : Service(), LocationListener {
 
     fun stopDrivingMode() {
         isDrivingActive = false
+        completedTunnelApproachDir = null
         if (navEngine.isNavigating) {
             navEngine.stopNavigation()
         }
