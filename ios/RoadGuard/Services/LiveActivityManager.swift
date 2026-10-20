@@ -58,7 +58,7 @@ public final class LiveActivityManager: ObservableObject {
 
     public func startLiveActivity(initialSpeed: Int = 0) {
         #if canImport(ActivityKit)
-        if #available(iOS 16.1, *) {
+        if #available(iOS 16.2, *) {
             guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
             if currentActivity != nil {
@@ -96,7 +96,7 @@ public final class LiveActivityManager: ObservableObject {
 
     public func updateRadarState(snapshot: RadarSnapshot) {
         #if canImport(ActivityKit)
-        if #available(iOS 16.1, *) {
+        if #available(iOS 16.2, *) {
             guard let activity = currentActivity else { return }
 
             let nearestCam = snapshot.nearestCamera
@@ -134,7 +134,7 @@ public final class LiveActivityManager: ObservableObject {
 
     public func endLiveActivity() {
         #if canImport(ActivityKit)
-        if #available(iOS 16.1, *) {
+        if #available(iOS 16.2, *) {
             guard let activity = currentActivity else { return }
             Task {
                 await activity.end(dismissalPolicy: .immediate)

@@ -196,7 +196,7 @@ public final class RadarEngine: ObservableObject {
         currentLng += sin(rad) * deltaDeg
 
         // 模擬接近測速桿後自動微調車速
-        if simStep in 18...28 {
+        if (18...28).contains(simStep) {
             currentSpeedKmh = max(36, currentSpeedKmh - 2)
         } else if simStep > 45 {
             simStep = 0

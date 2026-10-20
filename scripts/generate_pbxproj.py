@@ -311,7 +311,7 @@ content += f"""\t\t{proj_debug_config_id} /* Debug */ = {{
 \t\t\t\tDEBUG_INFORMATION_FORMAT = dwarf;
 \t\t\t\tENABLE_TESTABILITY = YES;
 \t\t\t\tGCC_OPTIMIZATION_LEVEL = 0;
-\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 16.1;
+\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 16.2;
 \t\t\t\tMTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 \t\t\t\tONLY_ACTIVE_ARCH = YES;
 \t\t\t\tSDKROOT = iphoneos;
@@ -329,7 +329,7 @@ content += f"""\t\t{proj_debug_config_id} /* Debug */ = {{
 \t\t\t\tCLANG_ENABLE_OBJC_ARC = YES;
 \t\t\t\tDEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 \t\t\t\tENABLE_NS_ASSERTIONS = NO;
-\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 16.1;
+\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 16.2;
 \t\t\t\tMTL_ENABLE_DEBUG_INFO = NO;
 \t\t\t\tSDKROOT = iphoneos;
 \t\t\t\tSWIFT_COMPILATION_MODE = wholemodule;

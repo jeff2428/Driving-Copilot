@@ -7,7 +7,7 @@ public final class HsuehshanTunnelClient: @unchecked Sendable {
 
     private let apiUrl = URL(string: "https://hsuehshan-tunnel.pages.dev/api/tunnel")!
     private let cacheDuration: TimeInterval = 25.0 // 快取 25 秒
-    private let lock = NSLock()
+    private let syncQueue = DispatchQueue(label: "tw.roadguard.hsuehshan.sync")
 
     private var cachedReport: [String: Any]?
     private var lastFetchTimestamp: Date = .distantPast
@@ -17,27 +17,32 @@ public final class HsuehshanTunnelClient: @unchecked Sendable {
 
     /// 背景非同步預熱或更新雪隧最新車流與車道數據
     public func refreshAsync(force: Bool = false, completion: ((Bool) -> Void)? = nil) {
-        lock.lock()
-        let now = Date()
-        if !force && cachedReport != nil && (now.timeIntervalSince(lastFetchTimestamp) < cacheDuration) {
-            lock.unlock()
-            completion?(true)
+        var shouldFetch = false
+        syncQueue.sync {
+            let now = Date()
+            if !force && cachedReport != nil && (now.timeIntervalSince(lastFetchTimestamp) < cacheDuration) {
+                shouldFetch = false
+                return
+            }
+            if isFetching {
+                shouldFetch = false
+                return
+            }
+            isFetching = true
+            shouldFetch = true
+        }
+
+        guard shouldFetch else {
+            completion?(cachedReport != nil)
             return
         }
-        if isFetching {
-            lock.unlock()
-            completion?(false)
-            return
-        }
-        isFetching = true
-        lock.unlock()
 
         Task.detached { [weak self] in
             guard let self = self else { return }
             let success = await self.fetchSync()
-            self.lock.lock()
-            self.isFetching = false
-            self.lock.unlock()
+            self.syncQueue.sync {
+                self.isFetching = false
+            }
             completion?(success)
         }
     }
@@ -54,10 +59,10 @@ public final class HsuehshanTunnelClient: @unchecked Sendable {
                 return false
             }
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                lock.lock()
-                self.cachedReport = json
-                self.lastFetchTimestamp = Date()
-                lock.unlock()
+                syncQueue.sync {
+                    self.cachedReport = json
+                    self.lastFetchTimestamp = Date()
+                }
                 return true
             }
         } catch {
@@ -76,10 +81,13 @@ public final class HsuehshanTunnelClient: @unchecked Sendable {
         let dirLabel = dirKey == "N" ? "北上 (往台北)" : "南下 (往宜蘭)"
         let towards = dirKey == "N" ? "往台北" : "往宜蘭"
 
-        lock.lock()
-        let shouldRefresh = Date().timeIntervalSince(lastFetchTimestamp) > cacheDuration
-        let root = cachedReport
-        lock.unlock()
+        var root: [String: Any]?
+        var shouldRefresh = false
+
+        syncQueue.sync {
+            shouldRefresh = Date().timeIntervalSince(lastFetchTimestamp) > cacheDuration
+            root = cachedReport
+        }
 
         if shouldRefresh {
             refreshAsync()
