@@ -1857,7 +1857,6 @@ class MainActivity : AppCompatActivity() {
                     startInAppNavigation(route)
                 }
                 .setNeutralButton("🗺️ Google Maps + 懸浮窗") { _, _ ->
-                    s.startDrivingMode()
                     launchWithOverlay("google.navigation:q=${scan.destLat},${scan.destLng}&mode=d")
                 }
                 .setNegativeButton("取消", null)
@@ -1870,10 +1869,10 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("開始行車")
                 .setItems(options) { _, which ->
-                    s.startDrivingMode()
                     if (which == 1) {
                         launchWithOverlay(null)
                     } else {
+                        s.startDrivingMode()
                         Toast.makeText(this, "行車模式已啟動：開始測速與路況預警", Toast.LENGTH_SHORT).show()
                     }
                 }

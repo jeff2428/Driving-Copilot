@@ -1281,9 +1281,20 @@ class RoadGuardService : Service(), LocationListener {
 
     fun isFloatingOverlayShowing(): Boolean = floatingRootView != null
 
+    private var lastStartDrivingTime = 0L
+
     fun startDrivingMode() {
+        val now = System.currentTimeMillis()
+        if (isDrivingActive && now - lastStartDrivingTime < 5000L) {
+            return
+        }
+        val wasActive = isDrivingActive
         isDrivingActive = true
-        voiceEngine.speakNavigation("神盾行車防護已啟動，祝您行車平安")
+        lastStartDrivingTime = now
+
+        if (!wasActive) {
+            voiceEngine.speakNavigation("神盾行車防護已啟動，祝您行車平安")
+        }
         recomputeRadarState()
     }
 

@@ -50,8 +50,17 @@ public final class RadarEngine: ObservableObject {
         }
     }
 
+    private var lastStartDrivingTime: Date = .distantPast
+
     public func startDriving() {
+        let now = Date()
+        if isDrivingActive && now.timeIntervalSince(lastStartDrivingTime) < 5.0 {
+            return
+        }
+        let wasActive = isDrivingActive
         isDrivingActive = true
+        lastStartDrivingTime = now
+
         locationManager.startUpdating()
         voiceEngine.resetMemory()
         approachingCameraId = nil
@@ -60,7 +69,9 @@ public final class RadarEngine: ObservableObject {
         completedTunnelApproachDir = nil
 
         liveActivityManager.startLiveActivity(initialSpeed: currentSpeedKmh)
-        voiceEngine.speakNow(text: "神盾路況行車助手已啟動，祝您行車平安！", urgentTone: false)
+        if !wasActive {
+            voiceEngine.speakNow(text: "神盾路況行車助手已啟動，祝您行車平安！", urgentTone: false)
+        }
         recomputeRadarState()
     }
 

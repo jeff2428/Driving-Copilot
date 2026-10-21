@@ -97,8 +97,17 @@ public final class VoiceAlertEngine: NSObject, ObservableObject, AVSpeechSynthes
 
     // MARK: - 即時語音播報
 
+    private var lastSpokenText: String = ""
+    private var lastSpokenTime: Date = .distantPast
+
     public func speakNow(text: String, urgentTone: Bool = false) {
         guard isVoiceEnabled, !text.isEmpty else { return }
+        let now = Date()
+        if text == lastSpokenText && now.timeIntervalSince(lastSpokenTime) < 4.0 {
+            return
+        }
+        lastSpokenText = text
+        lastSpokenTime = now
 
         activateAudioDucking()
 

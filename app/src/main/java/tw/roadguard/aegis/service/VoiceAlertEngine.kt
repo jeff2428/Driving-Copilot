@@ -121,8 +121,18 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         }, 280L)
     }
 
+    private var lastNavSpokenText: String = ""
+    private var lastNavSpokenTime: Long = 0L
+
     fun speakNavigation(text: String) {
         if (!isVoiceEnabled) return
+        val now = System.currentTimeMillis()
+        if (text == lastNavSpokenText && now - lastNavSpokenTime < 4000L) {
+            return
+        }
+        lastNavSpokenText = text
+        lastNavSpokenTime = now
+
         requestDuckingFocus()
         if (isTtsReady) {
             tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "NAV-${System.currentTimeMillis()}")
