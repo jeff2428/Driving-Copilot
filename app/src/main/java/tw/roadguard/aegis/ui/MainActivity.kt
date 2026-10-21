@@ -1774,8 +1774,8 @@ class MainActivity : AppCompatActivity() {
             val hotCam = s.nearestCamera?.camera?.id
             val hotEv = s.nearestRoadEvent?.event?.uid
             val cams = JSONArray()
-            s.nearbyCameras.take(25).forEach { sc ->
-                val c = sc.camera
+            val camerasSource = if (s.mapVisibleCameras.isNotEmpty()) s.mapVisibleCameras else s.nearbyCameras.map { it.camera }
+            camerasSource.forEach { c ->
                 val hot = c.id == hotCam
                 cams.put(JSONObject().apply {
                     put("id", c.id); put("lat", c.lat); put("lng", c.lng); put("limit", c.speedLimit)
@@ -1786,8 +1786,8 @@ class MainActivity : AppCompatActivity() {
                 })
             }
             val evs = JSONArray()
-            s.nearbyEvents.take(30).forEach { se ->
-                val e = se.event
+            val eventsSource = if (s.mapVisibleEvents.isNotEmpty()) s.mapVisibleEvents else s.nearbyEvents.map { it.event }
+            eventsSource.forEach { e ->
                 val hot = e.uid == hotEv
                 evs.put(JSONObject().apply {
                     put("id", e.uid); put("lat", e.lat); put("lng", e.lng); put("severity", e.severity.name)

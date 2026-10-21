@@ -72,44 +72,48 @@ public struct RadarMapView: UIViewRepresentable {
                 return
             }
 
-            // 組裝 JavaScript updateRadarMap 酬載
+            // 組裝 JavaScript updateRadarMap 酬載（優先使用全地圖可見半徑實體標記，確保與路網 100% 精準對應）
             var camList: [[String: Any]] = []
-            for sc in snap.nearbyCameras {
+            let camerasSource = !snap.mapVisibleCameras.isEmpty ? snap.mapVisibleCameras : snap.nearbyCameras.map { $0.camera }
+            for c in camerasSource {
+                let isHot = c.id == snap.nearestCamera?.camera.id
                 camList.append([
-                    "id": sc.camera.id,
-                    "lat": sc.camera.lat,
-                    "lng": sc.camera.lng,
-                    "limit": sc.camera.speedLimit,
-                    "type": sc.camera.type.label,
-                    "address": sc.camera.address,
-                    "direct": sc.camera.directText,
-                    "interval": sc.camera.type == .interval,
-                    "hotspot": sc.camera.type == .hotspot,
-                    "hot": sc.camera.id == snap.nearestCamera?.camera.id,
-                    "sig": "\(sc.camera.id)-\(sc.camera.id == snap.nearestCamera?.camera.id)"
+                    "id": c.id,
+                    "lat": c.lat,
+                    "lng": c.lng,
+                    "limit": c.speedLimit,
+                    "type": c.type.label,
+                    "address": c.address,
+                    "direct": c.directText,
+                    "interval": c.type == .interval,
+                    "hotspot": c.type == .hotspot,
+                    "hot": isHot,
+                    "sig": "\(c.speedLimit)-\(isHot)-\(c.type.label)"
                 ])
             }
 
             var evList: [[String: Any]] = []
-            for se in snap.nearbyEvents {
+            let eventsSource = !snap.mapVisibleEvents.isEmpty ? snap.mapVisibleEvents : snap.nearbyEvents.map { $0.event }
+            for e in eventsSource {
                 let sevKey: String
-                switch se.event.severity {
+                switch e.severity {
                 case .closure: sevKey = "CLOSURE"
                 case .construction: sevKey = "CONSTRUCTION"
                 case .hazard: sevKey = "HAZARD"
                 case .congestion: sevKey = "CONGESTION"
                 }
+                let isHot = e.uid == snap.nearestRoadEvent?.event.uid
                 evList.append([
-                    "id": se.event.uid,
-                    "lat": se.event.lat,
-                    "lng": se.event.lng,
-                    "road": se.event.roadName,
+                    "id": e.uid,
+                    "lat": e.lat,
+                    "lng": e.lng,
+                    "road": e.roadName,
                     "severity": sevKey,
-                    "label": se.event.severity.label,
-                    "comment": se.event.rawComment,
-                    "schedule": se.event.scheduleNote,
-                    "hot": se.event.uid == snap.nearestRoadEvent?.event.uid,
-                    "sig": "\(se.event.uid)-\(se.event.uid == snap.nearestRoadEvent?.event.uid)"
+                    "label": e.severity.label,
+                    "comment": e.rawComment,
+                    "schedule": e.scheduleNote,
+                    "hot": isHot,
+                    "sig": "\(e.severity.label)-\(isHot)"
                 ])
             }
 

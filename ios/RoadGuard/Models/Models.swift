@@ -261,6 +261,8 @@ public struct RadarSnapshot {
     public var nearestRoadEvent: ScoredRoadEvent? = nil
     public var nearbyEvents: [ScoredRoadEvent] = []
     public var nearbyCameras: [ScoredCamera] = []
+    public var mapVisibleCameras: [SpeedCamera] = []
+    public var mapVisibleEvents: [RoadEvent] = []
     public var lastUpdatedTime: String = "--:--"
     public var totalCamerasCount: Int = 0
     public var totalActiveEventsCount: Int = 0
@@ -283,6 +285,8 @@ public struct RadarSnapshot {
         nearestRoadEvent: ScoredRoadEvent? = nil,
         nearbyEvents: [ScoredRoadEvent] = [],
         nearbyCameras: [ScoredCamera] = [],
+        mapVisibleCameras: [SpeedCamera] = [],
+        mapVisibleEvents: [RoadEvent] = [],
         lastUpdatedTime: String = "--:--",
         totalCamerasCount: Int = 0,
         totalActiveEventsCount: Int = 0,
@@ -304,6 +308,8 @@ public struct RadarSnapshot {
         self.nearestRoadEvent = nearestRoadEvent
         self.nearbyEvents = nearbyEvents
         self.nearbyCameras = nearbyCameras
+        self.mapVisibleCameras = mapVisibleCameras
+        self.mapVisibleEvents = mapVisibleEvents
         self.lastUpdatedTime = lastUpdatedTime
         self.totalCamerasCount = totalCamerasCount
         self.totalActiveEventsCount = totalActiveEventsCount

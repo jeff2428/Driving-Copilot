@@ -16,22 +16,28 @@
 
   .cam { width:22px; height:22px; border-radius:50%; background:#fff; border:3px solid #E5383B;
     color:#111; font:800 10px/16px sans-serif; text-align:center; box-sizing:border-box;
-    box-shadow:0 1px 4px rgba(0,0,0,.45); }
+    box-shadow:0 1px 4px rgba(0,0,0,.45); transition: transform .25s ease-out; }
   .cam.interval { border-color:#7C3AED; }
   .cam.hotspot { border-color:#EA580C; background:#FFF7ED; color:#9A3412; font-weight:900; }
-  .cam.hot { transform:scale(1.35); box-shadow:0 0 0 4px rgba(229,56,59,.35); }
-  .cam.hotspot.hot { transform:scale(1.35); box-shadow:0 0 0 4px rgba(234,88,12,.4); }
+  .cam.hot { transform:scale(1.4); box-shadow:0 0 0 5px rgba(229,56,59,.45); z-index:1200 !important; }
+  .cam.hotspot.hot { transform:scale(1.4); box-shadow:0 0 0 5px rgba(234,88,12,.5); z-index:1200 !important; }
 
   .ev { width:24px; height:24px; border-radius:7px; color:#fff; font:700 13px/24px sans-serif; text-align:center;
-    box-shadow:0 1px 5px rgba(0,0,0,.5); border:2px solid #fff; box-sizing:border-box; }
+    box-shadow:0 1px 5px rgba(0,0,0,.5); border:2px solid #fff; box-sizing:border-box; transition: transform .25s ease-out; }
   .ev.CLOSURE { background:#E11D48; }
   .ev.CONSTRUCTION { background:#F59E0B; }
   .ev.HAZARD { background:#7C3AED; }
   .ev.CONGESTION { background:#64748B; }
-  .ev.hot { transform:scale(1.3); }
+  .ev.hot { transform:scale(1.35); box-shadow:0 0 0 4px rgba(245,158,11,.45); z-index:1200 !important; }
 
-  .me { width:38px; height:38px; }
-  .me svg { width:38px; height:38px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.45)); transition: transform .4s linear; }
+  .me { width:38px; height:38px; position:relative; }
+  .me svg {
+    width:38px; height:38px; display:block;
+    transform-origin: 50% 50% !important;
+    transform-box: fill-box;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,.45));
+    transition: transform .25s ease-out;
+  }
 
   .leaflet-popup-content-wrapper { border-radius:12px; }
   .leaflet-popup-content { margin:10px 12px; font-size:13px; line-height:1.45; }
@@ -41,7 +47,7 @@
 <div id="map"></div>
 <script>/*LEAFLET_JS*/</script>
 <script>
-  var map, tiles, meMarker, accCircle, routeLine;
+  var map, tiles, meMarker, radarBeam, routeLine;
   var camMarkers = {}, evMarkers = {};
   var follow = true, lastZoomSpeedBand = -1;
 
@@ -50,6 +56,7 @@
 
   function notify(name, v) {
     try { if (window.Android && Android[name]) Android[name](String(v)); } catch (e) {}
+    try { if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers[name]) window.webkit.messageHandlers[name].postMessage(v); } catch (e) {}
   }
 
   function init() {
@@ -86,7 +93,11 @@
 
   window.recenter = function () {
     init(); follow = true; lastZoomSpeedBand = -1;
-    if (meMarker) map.setView(meMarker.getLatLng(), map.getZoom() < 14 ? 15 : map.getZoom(), { animate:true });
+    if (meMarker) {
+      var z = map.getZoom() < 14 ? 15 : map.getZoom();
+      var target = getFollowCenter(meMarker.getLatLng(), z);
+      map.setView(target, z, { animate:true });
+    }
     notify('onFollowChanged', true);
   };
 
@@ -95,16 +106,81 @@
     map.setView([lat, lng], 16, { animate:true });
   };
 
+  function getFollowCenter(ll, z) {
+    if (!map) return ll;
+    try {
+      var pt = map.project(ll, z);
+      var offsetY = map.getSize().y * 0.10; // 車輛置於中偏下 60% 處，上方預留前方路況與儀表空間
+      var offsetPt = L.point(pt.x, pt.y - offsetY);
+      return map.unproject(offsetPt, z);
+    } catch (e) {
+      return ll;
+    }
+  }
+
+  function drawRadarBeam(ll, bearing, hasTarget) {
+    if (!map) return;
+    var rad = (bearing || 0) * Math.PI / 180.0;
+    var beamDist = 380.0; // 380 公尺掃描半徑
+    var halfAperture = 19.0 * Math.PI / 180.0; // 38 度走廊開角
+
+    var mPerLat = 110800.0;
+    var mPerLng = 111320.0 * Math.cos(ll[0] * Math.PI / 180.0);
+
+    var pts = [ll];
+    var arcSteps = 6;
+    for (var i = -arcSteps; i <= arcSteps; i++) {
+      var a = rad + halfAperture * (i / arcSteps);
+      var pLat = ll[0] + (beamDist * Math.cos(a)) / mPerLat;
+      var pLng = ll[1] + (beamDist * Math.sin(a)) / mPerLng;
+      pts.push([pLat, pLng]);
+    }
+    pts.push(ll);
+
+    var fillColor = hasTarget ? '#EF4444' : '#0284C7';
+    var strokeColor = hasTarget ? '#DC2626' : '#38BDF8';
+
+    if (!radarBeam) {
+      radarBeam = L.polygon(pts, {
+        color: strokeColor,
+        weight: 1.2,
+        opacity: 0.45,
+        fillColor: fillColor,
+        fillOpacity: 0.12,
+        dashArray: '3, 4',
+        interactive: false
+      }).addTo(map);
+    } else {
+      radarBeam.setLatLngs(pts);
+      radarBeam.setStyle({
+        color: strokeColor,
+        fillColor: fillColor,
+        fillOpacity: hasTarget ? 0.18 : 0.11
+      });
+    }
+  }
+
   function syncLayer(store, items, makeIcon, makePopup, keyOf) {
     var seen = {};
     items.forEach(function (it) {
       var k = keyOf(it); seen[k] = true;
       var m = store[k];
+      var newLl = [it.lat, it.lng];
       if (!m) {
-        m = L.marker([it.lat, it.lng], { icon: makeIcon(it), zIndexOffset: it.z || 0 }).bindPopup(makePopup(it));
-        m._sig = it.sig; m.addTo(map); store[k] = m;
-      } else if (m._sig !== it.sig) {
-        m.setIcon(makeIcon(it)); m._sig = it.sig;
+        m = L.marker(newLl, { icon: makeIcon(it), zIndexOffset: it.z || 0 }).bindPopup(makePopup(it));
+        m._sig = it.sig; m._lat = it.lat; m._lng = it.lng;
+        m.addTo(map); store[k] = m;
+      } else {
+        if (m._lat !== it.lat || m._lng !== it.lng) {
+          m.setLatLng(newLl);
+          m._lat = it.lat; m._lng = it.lng;
+        }
+        if (m._sig !== it.sig) {
+          m.setIcon(makeIcon(it));
+          m.setZIndexOffset(it.z || 0);
+          m.setPopupContent(makePopup(it));
+          m._sig = it.sig;
+        }
       }
     });
     Object.keys(store).forEach(function (k) { if (!seen[k]) { map.removeLayer(store[k]); delete store[k]; } });
@@ -122,17 +198,31 @@
       if (svg) svg.style.transform = 'rotate(' + (p.bearing || 0) + 'deg)';
     }
 
+    var hasLockedTarget = false;
+    var cams = p.cameras || [];
+    for (var i = 0; i < cams.length; i++) {
+      if (cams[i].hot) { hasLockedTarget = true; break; }
+    }
+
+    // 繪製車頭前向即時雷達掃描光錐
+    drawRadarBeam(ll, p.bearing || 0, hasLockedTarget);
+
     if (follow) {
       // 導航模式下鎖定車輛近距視角，一般巡航依車速自動縮放
       var z = isNavigatingMode ? (p.speed >= 75 ? 16 : 17) : ([14, 15, 16][p.speed >= 80 ? 0 : (p.speed >= 40 ? 1 : 2)]);
-      if (z !== lastZoomSpeedBand) { lastZoomSpeedBand = z; map.setView(ll, z, { animate:true }); }
-      else map.panTo(ll, { animate:true, duration:0.8 });
+      var centerTarget = getFollowCenter(ll, z);
+      if (z !== lastZoomSpeedBand) {
+        lastZoomSpeedBand = z;
+        map.setView(centerTarget, z, { animate:true });
+      } else {
+        map.panTo(centerTarget, { animate:true, duration:0.8 });
+      }
     }
 
     var showCams = map.getZoom() >= 13;
-    syncLayer(camMarkers, showCams ? (p.cameras || []) : [],
+    syncLayer(camMarkers, showCams ? cams : [],
       function (c) {
-        c.z = c.hot ? 900 : 100;
+        c.z = c.hot ? 1200 : 100;
         var isInterval = !!c.interval;
         var isHotspot = !!c.hotspot || c.type === '經常出沒點';
         var cls = 'cam' + (isInterval ? ' interval' : '') + (isHotspot ? ' hotspot' : '') + (c.hot ? ' hot' : '');
@@ -148,13 +238,17 @@
     var glyph = { CLOSURE:'⛔', CONSTRUCTION:'🚧', HAZARD:'⚠', CONGESTION:'≡' };
     syncLayer(evMarkers, p.events || [],
       function (e) {
-        e.z = e.hot ? 1000 : 300;
+        e.z = e.hot ? 1300 : 300;
         return L.divIcon({ className:'', iconSize:[24,24], iconAnchor:[12,12],
-          html:'<div class="ev ' + e.severity + (e.hot ? ' hot' : '') + '">' + (glyph[e.severity] || '!') + '</div>' });
+          html:'<div class="' + clsEvent(e) + '">' + (glyph[e.severity] || '!') + '</div>' });
       },
       function (e) { return '<b>' + e.label + '｜' + e.road + '</b><br>' + e.comment + '<br><small>' + e.schedule + '</small>'; },
       function (e) { return e.id; });
   };
+
+  function clsEvent(e) {
+    return 'ev ' + e.severity + (e.hot ? ' hot' : '');
+  }
 
   var destMarker = null;
   var isNavigatingMode = false;
@@ -186,7 +280,8 @@
       follow = true;
       notify('onFollowChanged', true);
       if (meMarker) {
-        map.setView(meMarker.getLatLng(), 17, { animate: true });
+        var z = 17;
+        map.setView(getFollowCenter(meMarker.getLatLng(), z), z, { animate: true });
       }
       if (destLat && destLng && !destMarker) {
         destMarker = L.marker([destLat, destLng], {

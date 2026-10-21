@@ -626,16 +626,25 @@ class RoadGuardService : Service(), LocationListener {
             }
         }
 
-        // 2. 篩選車頭正前方走廊內的候選測速照相
+        // 2. 篩選車頭正前方走廊內的候選測速照相與地圖全域可見標示
         val useDirectionalFilter = forwardConeOnly && (hasValidBearing || currentSpeedKmh > 3 || isSimulating || navEngine.isNavigating)
         val candidateCameras = ArrayList<ScoredCamera>()
+        val mapVisibleCams = ArrayList<Pair<SpeedCamera, Double>>()
 
         for (cam in repository.cameras) {
+            val dLat = kotlin.math.abs(cam.lat - currentLat)
+            val dLng = kotlin.math.abs(cam.lng - currentLng)
+
+            // 地圖物理地標採樣（半徑 4.5 公里，不受前向角度或車道方向過濾，忠實呈現真實世界地圖地標對應）
+            if (dLat <= 0.05 && dLng <= 0.05) {
+                val distMap = GeoUtils.distanceMeters(currentLat, currentLng, cam.lat, cam.lng)
+                if (distMap <= 4500.0) {
+                    mapVisibleCams.add(cam to distMap)
+                }
+            }
             if (cam.type == CameraType.HOTSPOT && !voiceEngine.isHotspotAlertEnabled) continue
             if (passedCameraCooldownMap.containsKey(cam.id)) continue
 
-            val dLat = kotlin.math.abs(cam.lat - currentLat)
-            val dLng = kotlin.math.abs(cam.lng - currentLng)
             if (dLat > 0.035 || dLng > 0.035) continue
 
             val dist = GeoUtils.distanceMeters(currentLat, currentLng, cam.lat, cam.lng)
@@ -697,6 +706,9 @@ class RoadGuardService : Service(), LocationListener {
             it.distanceMeters + GeoUtils.crossTrackDistanceMeters(it.distanceMeters, it.relativeAngleDeg) * 1.8
         }
 
+        mapVisibleCams.sortBy { it.second }
+        val mapVisibleCamerasList = mapVisibleCams.take(75).map { it.first }
+
         // 依測速桿速限與目前車速決定有效鎖定半徑（避免市區 40km/h 測速桿在 1 公里外過早鎖定）
         val nearestCam = candidateCameras.firstOrNull { sc ->
             val maxLockRadius = when {
@@ -755,10 +767,23 @@ class RoadGuardService : Service(), LocationListener {
         }
 
         val candidateEvents = ArrayList<ScoredRoadEvent>()
+        val mapVisibleEvs = ArrayList<Pair<RoadEvent, Double>>()
         var activeTotal = 0
         for (ev in repository.roadEvents) {
             if (ev.isCleared) continue
             activeTotal++
+
+            val dLat = kotlin.math.abs(ev.lat - currentLat)
+            val dLng = kotlin.math.abs(ev.lng - currentLng)
+
+            // 地圖物理路況事件採樣（半徑 8 公里，完整呈現地圖周遭道路封閉與施工標示）
+            if (dLat <= 0.08 && dLng <= 0.08) {
+                val distMap = GeoUtils.distanceMeters(currentLat, currentLng, ev.lat, ev.lng)
+                if (distMap <= 8000.0) {
+                    mapVisibleEvs.add(ev to distMap)
+                }
+            }
+
             val dist = GeoUtils.distanceMeters(currentLat, currentLng, ev.lat, ev.lng)
             if (dist > 25_000.0) continue
 
@@ -779,6 +804,9 @@ class RoadGuardService : Service(), LocationListener {
                 candidateEvents.add(ScoredRoadEvent(ev, dist, relAngle))
             }
         }
+
+        mapVisibleEvs.sortBy { it.second }
+        val mapVisibleEventsList = mapVisibleEvs.take(35).map { it.first }
 
         // 前方預警優先挑選：距離在預警半徑內、位於車頭前方走廊且正在生效的「封閉管制」或「道路施工」
         candidateEvents.sortWith(
@@ -881,6 +909,8 @@ class RoadGuardService : Service(), LocationListener {
             nearestRoadEvent = alertEvent,
             nearbyEvents = candidateEvents.take(30),
             nearbyCameras = candidateCameras.take(25),
+            mapVisibleCameras = mapVisibleCamerasList,
+            mapVisibleEvents = mapVisibleEventsList,
             lastUpdatedTime = repository.lastSyncTimeStr,
             totalCamerasCount = repository.cameras.size,
             totalActiveEventsCount = activeTotal,

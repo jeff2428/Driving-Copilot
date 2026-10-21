@@ -182,6 +182,8 @@ data class RadarSnapshot(
     val nearestRoadEvent: ScoredRoadEvent? = null,
     val nearbyEvents: List<ScoredRoadEvent> = emptyList(),
     val nearbyCameras: List<ScoredCamera> = emptyList(),
+    val mapVisibleCameras: List<SpeedCamera> = emptyList(),
+    val mapVisibleEvents: List<RoadEvent> = emptyList(),
     val lastUpdatedTime: String = "--:--",
     val totalCamerasCount: Int = 0,
     val totalActiveEventsCount: Int = 0,

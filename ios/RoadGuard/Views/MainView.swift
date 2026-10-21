@@ -27,9 +27,13 @@ public struct MainView: View {
 
                 Spacer()
 
-                // 2. 中央儀表板 (GPS 時速、速限圓牌、超速光環)
-                centralSpeedometer
-                    .padding(.bottom, 16)
+                // 2. 懸浮儀表板 (左下角時速表，不遮擋中央車身位置與前方雷達光錐)
+                HStack(alignment: .bottom) {
+                    centralSpeedometer
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
 
                 // 3. 底部快捷操作列 (開始行車、模擬試駕、雪隧建議、設定)
                 bottomControlsBar
@@ -180,27 +184,27 @@ public struct MainView: View {
         }
     }
 
-    // MARK: - 中央儀表板
+    // MARK: - 懸浮時速儀表板 (左下角精準微型化，不遮擋道路與車標)
 
     private var centralSpeedometer: some View {
         let snap = radarEngine.snapshot
 
-        return VStack(spacing: 6) {
+        return VStack(spacing: 4) {
             ZStack {
                 // 外圈時速光環
                 Circle()
-                    .stroke(snap.isOverspeed ? Color.red : Color.blue.opacity(0.35), lineWidth: 10)
-                    .frame(width: 150, height: 150)
-                    .background(Circle().fill(Color.black.opacity(0.82)))
-                    .shadow(color: snap.isOverspeed ? Color.red : Color.blue.opacity(0.3), radius: 10)
+                    .stroke(snap.isOverspeed ? Color.red : Color.blue.opacity(0.45), lineWidth: 7)
+                    .frame(width: 112, height: 112)
+                    .background(Circle().fill(Color.black.opacity(0.85)))
+                    .shadow(color: snap.isOverspeed ? Color.red : Color.blue.opacity(0.35), radius: 8)
 
-                VStack(spacing: 0) {
+                VStack(spacing: -2) {
                     Text("\(snap.speedKmh)")
-                        .font(.system(size: 56, weight: .black, design: .rounded))
+                        .font(.system(size: 42, weight: .black, design: .rounded))
                         .foregroundColor(snap.isOverspeed ? .red : .white)
 
                     Text("km/h")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.gray)
                 }
 
@@ -210,34 +214,34 @@ public struct MainView: View {
                         HStack {
                             Spacer()
                             ZStack {
-                                Circle().fill(Color.white).frame(width: 38, height: 38)
-                                Circle().stroke(Color.red, lineWidth: 3.5).frame(width: 38, height: 38)
+                                Circle().fill(Color.white).frame(width: 32, height: 32)
+                                Circle().stroke(Color.red, lineWidth: 3).frame(width: 32, height: 32)
                                 Text("\(cam.camera.speedLimit)")
-                                    .font(.system(size: 16, weight: .black))
+                                    .font(.system(size: 14, weight: .black))
                                     .foregroundColor(.black)
                             }
-                            .offset(x: 10, y: -10)
+                            .offset(x: 6, y: -6)
                         }
                         Spacer()
                     }
-                    .frame(width: 150, height: 150)
+                    .frame(width: 112, height: 112)
                 }
             }
 
             // 車頭方位角膠囊標籤
-            HStack(spacing: 4) {
+            HStack(spacing: 3) {
                 Image(systemName: "location.north.line.fill")
                     .rotationEffect(.degrees(snap.bearingDeg))
                     .foregroundColor(.blue)
+                    .font(.system(size: 10, weight: .bold))
                 Text("\(snap.bearingLabel) \(Int(snap.bearingDeg))°")
-                    .font(.caption)
-                    .fontWeight(.bold)
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.white)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Color.black.opacity(0.7))
-            .cornerRadius(12)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color.black.opacity(0.75))
+            .cornerRadius(10)
         }
     }
 

@@ -292,11 +292,22 @@ public final class RadarEngine: ObservableObject {
             }
         }
 
-        // 3. 篩選車頭正前方走廊內的候選測速桿
+        // 3. 篩選車頭正前方走廊內的候選測速桿與地圖可見標示
         let useDirectionalFilter = forwardConeOnly && (hasValidBearing || currentSpeedKmh > 3 || isSimulating)
         var candidateCameras: [ScoredCamera] = []
+        var mapVisibleCams: [(camera: SpeedCamera, distance: Double)] = []
 
         for cam in repository.cameras {
+            let dLat = abs(cam.lat - currentLat)
+            let dLng = abs(cam.lng - currentLng)
+
+            // 地圖物理地標採樣（半徑 4.5 公里，不受前向角度或車道方向過濾，忠實呈現真實世界地圖地標對應）
+            if dLat <= 0.05 && dLng <= 0.05 {
+                let distMap = GeoUtils.distanceMeters(lat1: currentLat, lng1: currentLng, lat2: cam.lat, lng2: cam.lng)
+                if distMap <= 4500.0 {
+                    mapVisibleCams.append((camera: cam, distance: distMap))
+                }
+            }
             if cam.type == .hotspot && !voiceEngine.isHotspotAlertEnabled { continue }
             if passedCameraCooldownMap[cam.id] != nil { continue }
 
@@ -350,6 +361,9 @@ public final class RadarEngine: ObservableObject {
             return score1 < score2
         }
 
+        mapVisibleCams.sort { $0.distance < $1.distance }
+        let mapVisibleCamerasList = Array(mapVisibleCams.prefix(75).map { $0.camera })
+
         let nearestCam = candidateCameras.first { sc in
             let maxLockRadius: Double
             if sc.camera.speedLimit >= 80 || currentSpeedKmh >= 82 {
@@ -385,9 +399,21 @@ public final class RadarEngine: ObservableObject {
         // 4. 掃描前方施工與路況
         let dynamicEventRadius: Double = currentSpeedKmh >= 85 ? 2800.0 : (currentSpeedKmh >= 60 ? 1800.0 : 1200.0)
         var candidateEvents: [ScoredRoadEvent] = []
+        var mapVisibleEvs: [(event: RoadEvent, distance: Double)] = []
 
         for ev in repository.roadEvents {
             if ev.isCleared { continue }
+            let dLat = abs(ev.lat - currentLat)
+            let dLng = abs(ev.lng - currentLng)
+
+            // 地圖物理路況事件採樣（半徑 8 公里，完整呈現地圖周遭道路封閉與施工標示）
+            if dLat <= 0.08 && dLng <= 0.08 {
+                let distMap = GeoUtils.distanceMeters(lat1: currentLat, lng1: currentLng, lat2: ev.lat, lng2: ev.lng)
+                if distMap <= 8000.0 {
+                    mapVisibleEvs.append((event: ev, distance: distMap))
+                }
+            }
+
             let dist = GeoUtils.distanceMeters(lat1: currentLat, lng1: currentLng, lat2: ev.lat, lng2: ev.lng)
             if dist > 25000.0 { continue }
 
@@ -416,6 +442,9 @@ public final class RadarEngine: ObservableObject {
             }
             return $0.distanceMeters < $1.distanceMeters
         }
+
+        mapVisibleEvs.sort { $0.distance < $1.distance }
+        let mapVisibleEventsList = Array(mapVisibleEvs.prefix(35).map { $0.event })
 
         let alertEvent = candidateEvents.first { se in
             let crossTrack = GeoUtils.crossTrackDistanceMeters(distanceMeters: se.distanceMeters, relativeAngleDeg: se.relativeAngleDeg)
@@ -499,8 +528,10 @@ public final class RadarEngine: ObservableObject {
             intervalAvgSpeedKmh: currentSpeedKmh,
             intervalRemainingSec: 0,
             nearestRoadEvent: alertEvent,
-            nearbyEvents: Array(candidateEvents.prefix(8)),
-            nearbyCameras: Array(candidateCameras.prefix(8)),
+            nearbyEvents: Array(candidateEvents.prefix(30)),
+            nearbyCameras: Array(candidateCameras.prefix(25)),
+            mapVisibleCameras: mapVisibleCamerasList,
+            mapVisibleEvents: mapVisibleEventsList,
             lastUpdatedTime: updateTime,
             totalCamerasCount: repository.cameras.count,
             totalActiveEventsCount: repository.roadEvents.count,
