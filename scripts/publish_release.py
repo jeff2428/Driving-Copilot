@@ -87,14 +87,24 @@ def run():
         else:
             print("  ⚠️ git push 未完成，請檢查網路連線")
             
-        # gh release upload APK
-        print(f"  ➔ 正在建立 GitHub Release (v{vname}) 並上傳 APK 安裝包...")
+        # gh release upload APK and IPA
+        print(f"  ➔ 正在建立 GitHub Release (v{vname}) 並上傳安裝包...")
+        files_to_upload = [str(dst1)]
+        ipa_file = BASE_DIR / "RoadGuard-Aegis.ipa"
+        if ipa_file.exists():
+            files_to_upload.append(str(ipa_file))
+
         release_cmd = [
             "gh", "release", "create", f"v{vname}",
-            str(dst1),
+            *files_to_upload,
             "--title", f"神盾路況行車助手 v{vname}",
             "--notes", (
                 f"神盾路況行車助手 v{vname} 最新版發布：\n"
+                f"- 🗺️ 地圖標示與實體路網 100% 精準對齊：\n"
+                f"  • 解耦雷達警報前向走廊與地圖實體標記，地圖如實呈現半徑 4.5km 所有測速照相與 8km 施工封閉\n"
+                f"  • 修正車輛箭頭 SVG 旋轉中心點偏移 (transform-origin 50% 50%)，車輛轉彎不再離心漂移\n"
+                f"  • 全新動態車頭前方雷達掃描光錐 (380m, 38°)，清楚呈現雷達探測覆蓋區域\n"
+                f"  • 跟隨模式行車前向視野預留，iOS 儀表板微型化不遮擋路網\n"
                 f"- 🎯 大幅提高測速提醒與路況警告精準度：\n"
                 f"  • 新增橫向偏距走廊過濾 (Cross-Track Corridor)，剔除隔壁平行道路與非行進車道之誤報\n"
                 f"  • 雙重解析警政署測速題庫「設置地址 + 拍攝方向」，並區分單向與南北/東西軸線，防止橫向路口誤報\n"
