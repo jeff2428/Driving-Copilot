@@ -311,8 +311,6 @@ public final class RadarEngine: ObservableObject {
             if cam.type == .hotspot && !voiceEngine.isHotspotAlertEnabled { continue }
             if passedCameraCooldownMap[cam.id] != nil { continue }
 
-            let dLat = abs(cam.lat - currentLat)
-            let dLng = abs(cam.lng - currentLng)
             if dLat > 0.035 || dLng > 0.035 { continue }
 
             let dist = GeoUtils.distanceMeters(lat1: currentLat, lng1: currentLng, lat2: cam.lat, lng2: cam.lng)

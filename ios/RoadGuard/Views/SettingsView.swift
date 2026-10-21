@@ -161,7 +161,7 @@ public struct SettingsView: View {
         isSyncing = true
         syncStatusMessage = nil
         Task {
-            let (success, message) = await repository.syncAllCloudData(forceCameras: true)
+            let (_, message) = await repository.syncAllCloudData(forceCameras: true)
             await MainActor.run {
                 isSyncing = false
                 syncStatusMessage = message
