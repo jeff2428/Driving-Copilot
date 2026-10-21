@@ -293,4 +293,31 @@ public final class VoiceAlertEngine: NSObject, ObservableObject, AVSpeechSynthes
         announcedTunnelDirection = nil
         voiceLock.unlock()
     }
+
+    /// 多重警報智慧融合播報 (Alert Fusion)
+    public func announceFusedAlert(camera: SpeedCamera, cameraDist: Double, event: RoadEvent, isOver: Bool) {
+        guard isVoiceEnabled else { return }
+        let camMeters = max(50, Int(cameraDist / 50.0) * 50)
+        let prefix = isOver ? "警告！前方 \(camMeters) 公尺測速照相，您目前已超速！" : "注意，前方 \(camMeters) 公尺有測速照相，"
+        let tail = event.severity == .closure ? "，同時該路段有道路封閉，請減速準備改道。" : "，同時前方有\(event.voiceSummary)，請減速小心行駛。"
+        speakNow(text: prefix + tail, urgentTone: isOver || event.severity == .closure)
+    }
+
+    public func announceIntervalStart(camera: SpeedCamera) {
+        guard isVoiceEnabled else { return }
+        speakNow(text: "注意，前方進入區間測速起點，速限 \(camera.speedLimit) 公里，請維持等速行駛", urgentTone: false)
+    }
+
+    public func announceIntervalEnd(camera: SpeedCamera, avgSpeedKmh: Int) {
+        guard isVoiceEnabled else { return }
+        let isOver = avgSpeedKmh > camera.speedLimit
+        let statusText = !isOver ? "安全通過" : "平均時速已超速"
+        speakNow(text: "通過區間測速終點，區間平均時速 \(avgSpeedKmh) 公里，\(statusText)", urgentTone: isOver)
+    }
+
+    public func announceIntervalOverspeed(avgSpeedKmh: Int, speedLimit: Int) {
+        guard isVoiceEnabled else { return }
+        speakNow(text: "警告！目前區間均速 \(avgSpeedKmh) 公里，已超出速限 \(speedLimit)，請放慢車速！", urgentTone: true)
+    }
+
 }

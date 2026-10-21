@@ -103,7 +103,7 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
-    fun speakNow(text: String, urgentTone: Boolean = false) {
+    fun speakNow(text: String, urgentTone: Boolean = false, flushQueue: Boolean = false) {
         if (!isVoiceEnabled) return
         requestDuckingFocus()
         if (urgentTone) {
@@ -113,11 +113,39 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         }
         mainHandler.postDelayed({
             if (isTtsReady) {
-                tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "UTT-${System.currentTimeMillis()}")
+                val queueMode = if (flushQueue || urgentTone) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                tts?.speak(text, queueMode, null, "UTT-${System.currentTimeMillis()}")
             } else {
                 abandonAudioFocus()
             }
         }, 280L)
+    }
+
+    /** 區間測速專用預警播報 */
+    fun announceIntervalStart(camera: SpeedCamera) {
+        if (!isVoiceEnabled) return
+        speakNow("注意，前方進入區間測速起點，速限 ${camera.speedLimit} 公里，請維持等速行駛", urgentTone = false)
+    }
+
+    fun announceIntervalEnd(camera: SpeedCamera, avgSpeedKmh: Int) {
+        if (!isVoiceEnabled) return
+        val isOver = avgSpeedKmh > camera.speedLimit
+        val statusText = if (!isOver) "安全通過" else "平均時速已超速"
+        speakNow("通過區間測速終點，區間平均時速 $avgSpeedKmh 公里，$statusText", urgentTone = isOver)
+    }
+
+    fun announceIntervalOverspeed(avgSpeedKmh: Int, speedLimit: Int) {
+        if (!isVoiceEnabled) return
+        speakNow("警告！目前區間均速 $avgSpeedKmh 公里，已超出速限 $speedLimit，請放慢車速！", urgentTone = true)
+    }
+
+    /** 多重警報智慧融合播報 (Alert Fusion) */
+    fun announceFusedAlert(camera: SpeedCamera, cameraDist: Double, event: RoadEvent, isOver: Boolean) {
+        if (!isVoiceEnabled) return
+        val camMeters = ((cameraDist / 50).toInt() * 50).coerceAtLeast(50)
+        val prefix = if (isOver) "警告！前方 $camMeters 公尺測速照相，您目前已超速！" else "注意，前方 $camMeters 公尺有測速照相，"
+        val tail = if (event.severity == EventSeverity.CLOSURE) "，同時該路段有道路封閉，請減速準備改道。" else "，同時前方有${event.voiceSummary}，請減速小心行駛。"
+        speakNow(prefix + tail, urgentTone = isOver || event.severity == EventSeverity.CLOSURE, flushQueue = true)
     }
 
     private var lastNavSpokenText: String = ""

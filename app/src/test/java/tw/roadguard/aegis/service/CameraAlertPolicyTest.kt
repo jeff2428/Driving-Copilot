@@ -92,4 +92,51 @@ class CameraAlertPolicyTest {
         assertEquals("前方 1.2 公里", CameraAlertPolicy.distanceLabel(1150.0))
         assertEquals("前方 0 公尺", CameraAlertPolicy.distanceLabel(0.0))
     }
+
+    @Test fun mountainHairpinCurveDoesNotTriggerPassPrematurely() {
+        // 山路急彎：夾角突然轉到側後方 85 度，但直線距離仍在 120m (minApproachedDist = 110m)
+        assertFalse(CameraAlertPolicy.isCameraPassedByVector(
+            currentDist = 120.0,
+            relAngleDeg = 85.0,
+            minApproachedDist = 110.0,
+            isFreewayOrElevated = false
+        ))
+
+        // 真實通過平面道路測速桿 (曾逼近至 10m，目前距離 15m 夾角 160 度)
+        assertTrue(CameraAlertPolicy.isCameraPassedByVector(
+            currentDist = 15.0,
+            relAngleDeg = 160.0,
+            minApproachedDist = 10.0,
+            isFreewayOrElevated = false
+        ))
+
+        // 真實通過高架/國道路側門架 (曾逼近至 25m，目前距離 30m 夾角 150 度)
+        assertTrue(CameraAlertPolicy.isCameraPassedByVector(
+            currentDist = 30.0,
+            relAngleDeg = 150.0,
+            minApproachedDist = 25.0,
+            isFreewayOrElevated = true
+        ))
+    }
+
+    @Test fun elevatedRoadIdentificationFiltersSurfaceIntersections() {
+        assertTrue(CameraAlertPolicy.isElevatedRoad(camera(address = "市民大道高架東向12K")))
+        assertTrue(CameraAlertPolicy.isElevatedRoad(camera(address = "台64線西向18K")))
+        assertTrue(CameraAlertPolicy.isElevatedRoad(camera(address = "建國高架南下")))
+        assertFalse(CameraAlertPolicy.isElevatedRoad(camera(address = "市民大道四段與延吉街口")))
+        assertFalse(CameraAlertPolicy.isElevatedRoad(camera(address = "建國南路二段平面")))
+    }
+
+    @Test fun techEnforcementClassificationIdentifiesSpecificViolations() {
+        val camRedLight = camera(type = CameraType.TECH, address = "中正路與中山路口(取締闖紅燈)")
+        assertEquals(CameraAlertPolicy.TechType.RED_LIGHT, CameraAlertPolicy.parseTechEnforcementType(camRedLight))
+        val msgRedLight = CameraAlertPolicy.message(camRedLight, 1, 400.0, false)
+        assertTrue(msgRedLight.contains("取締闖紅燈"))
+
+        val camPedestrian = camera(type = CameraType.TECH, address = "博愛路未禮讓行人取締")
+        assertEquals(CameraAlertPolicy.TechType.PEDESTRIAN, CameraAlertPolicy.parseTechEnforcementType(camPedestrian))
+
+        val camBus = camera(type = CameraType.TECH, address = "信義路公車專用道")
+        assertEquals(CameraAlertPolicy.TechType.SPECIAL_LANE, CameraAlertPolicy.parseTechEnforcementType(camBus))
+    }
 }

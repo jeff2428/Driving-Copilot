@@ -59,6 +59,8 @@ class RoadGuardService : Service(), LocationListener {
         private set
     lateinit var navEngine: NavigationEngine
         private set
+    val intervalTracker = IntervalSpeedTracker()
+    private var currentZoneStatus: IntervalSpeedTracker.ZoneStatus? = null
 
     private var locationManager: LocationManager? = null
     private var windowManager: WindowManager? = null
@@ -607,7 +609,7 @@ class RoadGuardService : Service(), LocationListener {
         // 清理過期的已通過測速桿冷卻紀錄 (65 秒後釋放)
         passedCameraCooldownMap.entries.removeIf { now - it.value > 65_000L }
 
-        // 1. 檢查上一支正在接近中的測速桿是否已經「通過車身」(距離曾 <= 220m 且角度已轉至側後方 > 72° 或距離開始明顯拉遠)
+        // 1. 檢查上一支正在接近中的測速桿是否已經「通過車身」(使用向量通過門閥判定)
         if (approachingCameraId != null) {
             val trackedCam = repository.cameras.firstOrNull { it.id == approachingCameraId }
             if (trackedCam != null) {
@@ -615,10 +617,15 @@ class RoadGuardService : Service(), LocationListener {
                 val curBearing = GeoUtils.bearingDeg(currentLat, currentLng, trackedCam.lat, trackedCam.lng)
                 val curRelAngle = GeoUtils.angleDiff(currentBearingDeg.toDouble(), curBearing)
 
-                val passedByAngle = approachingCameraMinDist <= 220.0 && curRelAngle > 72.0
-                val passedByDistIncrease = approachingCameraMinDist <= 140.0 && curDist > approachingCameraMinDist + 16.0
+                val isHighSpeed = CameraAlertPolicy.isFreeway(trackedCam) || CameraAlertPolicy.isElevatedRoad(trackedCam)
+                val isPassed = CameraAlertPolicy.isCameraPassedByVector(
+                    currentDist = curDist,
+                    relAngleDeg = curRelAngle,
+                    minApproachedDist = approachingCameraMinDist,
+                    isFreewayOrElevated = isHighSpeed
+                )
 
-                if (passedByAngle || passedByDistIncrease) {
+                if (isPassed) {
                     if (canAlert) {
                         voiceEngine.playCameraPassedChime()
                     }
@@ -660,15 +667,17 @@ class RoadGuardService : Service(), LocationListener {
             val relAngle = GeoUtils.angleDiff(currentBearingDeg.toDouble(), targetBearing)
             val crossTrack = GeoUtils.crossTrackDistanceMeters(dist, relAngle)
 
-            // 國道/快速道路 vs 一般平面道路 車速與道路等級智慧分流 (避免橋上抓橋下、橋下抓橋上)
-            val isFreewayCam = CameraAlertPolicy.isFreeway(cam) || cam.address.contains("高架") ||
-                    cam.address.contains("快速") || cam.speedLimit >= 80
+            // 國道/快速/高架道路 vs 一般平面道路 車速與道路等級智慧分流 (避免橋上抓橋下、橋下抓橋上)
+            val isFreewayCam = CameraAlertPolicy.isFreeway(cam) || CameraAlertPolicy.isElevatedRoad(cam) ||
+                    cam.address.contains("高架") || cam.address.contains("快速") || cam.speedLimit >= 80
             val isRampCam = cam.address.contains("匝道") || cam.address.contains("出口") ||
                     cam.address.contains("入口") || cam.address.contains("交流道")
 
-            if (currentSpeedKmh >= 82 && cam.speedLimit <= 50 && !isFreewayCam && !isRampCam) {
-                // 高速行駛於國道/快速道路時，排除橋下速限 <= 50 之市區平面測速桿
-                continue
+            if ((currentSpeedKmh >= 60 && CameraAlertPolicy.isElevatedRoad(cam)) || (currentSpeedKmh >= 82)) {
+                // 高架/快速行駛時，排除橋下速限 <= 50 之市區平面測速桿
+                if (cam.speedLimit <= 50 && !isFreewayCam && !isRampCam) {
+                    continue
+                }
             }
             val cameraDistanceToRoute = validNavRoutePoints?.let {
                 minDistanceToPolyline(cam.lat, cam.lng, it)
@@ -745,25 +754,33 @@ class RoadGuardService : Service(), LocationListener {
             voiceEngine.checkAndAnnounceCamera(nearestCam.camera, nearestCam.distanceMeters, currentSpeedKmh)
         }
 
-        // 區間測速均速計算
-        val inInterval = nearestCam?.camera?.type == CameraType.INTERVAL && nearestCam.distanceMeters <= 1200.0
-        if (inInterval) {
-            if (intervalStartTimestamp == 0L) {
-                intervalStartTimestamp = System.currentTimeMillis()
-                intervalSpeedSum = 0.0
-                intervalSampleCount = 0
+        // 區間測速生命週期引擎更新
+        val intervalCandidate = candidateCameras.firstOrNull { it.camera.type == CameraType.INTERVAL }
+        val zoneStatus = intervalTracker.onLocationUpdate(
+            lat = currentLat,
+            lng = currentLng,
+            speedKmh = currentSpeedKmh,
+            nearestIntervalCamera = intervalCandidate?.camera,
+            distanceToCameraMeters = intervalCandidate?.distanceMeters ?: Double.MAX_VALUE,
+            now = now
+        )
+        currentZoneStatus = zoneStatus
+
+        if (canAlert) {
+            if (zoneStatus.state == IntervalSpeedTracker.State.APPROACHING_START && !intervalTracker.hasAnnouncedStart) {
+                intervalTracker.markStartAnnounced()
+                zoneStatus.camera?.let { voiceEngine.announceIntervalStart(it) }
+            } else if (zoneStatus.state == IntervalSpeedTracker.State.COMPLETED && !intervalTracker.hasAnnouncedEnd) {
+                intervalTracker.markEndAnnounced()
+                zoneStatus.camera?.let { voiceEngine.announceIntervalEnd(it, zoneStatus.averageSpeedKmh) }
+            } else if (intervalTracker.shouldTriggerOverspeedVoice(now)) {
+                zoneStatus.camera?.let { voiceEngine.announceIntervalOverspeed(zoneStatus.averageSpeedKmh, it.speedLimit) }
             }
-            intervalSpeedSum += currentSpeedKmh
-            intervalSampleCount++
-        } else {
-            intervalStartTimestamp = 0L
-            intervalSpeedSum = 0.0
-            intervalSampleCount = 0
         }
-        val intervalAvg = if (intervalSampleCount > 0) (intervalSpeedSum / intervalSampleCount).roundToInt() else currentSpeedKmh
-        val intervalRemSec = if (inInterval && nearestCam != null) {
-            ((nearestCam.distanceMeters / ((nearestCam.camera.speedLimit / 3.6).coerceAtLeast(10.0)))).roundToInt()
-        } else 0
+
+        val inInterval = zoneStatus.state == IntervalSpeedTracker.State.IN_ZONE || zoneStatus.state == IntervalSpeedTracker.State.APPROACHING_END
+        val intervalAvg = zoneStatus.averageSpeedKmh
+        val intervalRemSec = zoneStatus.remainingSeconds
 
         // 3. 掃描前方施工、封閉與路況事件
         val dynamicEventRadius = when {
@@ -836,7 +853,14 @@ class RoadGuardService : Service(), LocationListener {
                     (!useDirectionalFilter || (se.relativeAngleDeg <= 48.0 && crossTrack <= 95.0 && GeoUtils.isDirectionCompatible(currentBearingDeg, se.event.direction)))
         }
         if (canAlert && alertEvent != null) {
-            voiceEngine.checkAndAnnounceRoadEvent(alertEvent.event, alertEvent.distanceMeters)
+            // 智慧警報融合：若同時有測速照相逼近 (<= 450m) 且道路封閉/施工在前方 (<= 600m)，融合為單一句型播報
+            val isOver = nearestCam != null && currentSpeedKmh > (nearestCam.camera.speedLimit + voiceEngine.overspeedToleranceKmh)
+            val shouldFuse = nearestCam != null && nearestCam.distanceMeters <= 450.0 && alertEvent.distanceMeters <= 600.0
+            if (shouldFuse) {
+                voiceEngine.announceFusedAlert(nearestCam.camera, nearestCam.distanceMeters, alertEvent.event, isOver)
+            } else {
+                voiceEngine.checkAndAnnounceRoadEvent(alertEvent.event, alertEvent.distanceMeters)
+            }
         }
 
         val isOverspeed = nearestCam != null &&
@@ -1346,11 +1370,17 @@ class RoadGuardService : Service(), LocationListener {
             val cam = snap.nearestCamera
             floatCameraDistanceTv?.visibility = View.GONE
             floatCameraDistanceTv?.text = ""
+            val currentZone = currentZoneStatus
             if (cam != null) {
                 floatSpeedLimitTv?.text = "${cam.camera.speedLimit}"
-                val icon = if (cam.camera.type == CameraType.HOTSPOT) "🚨" else "📸"
+                val icon = if (cam.camera.type == CameraType.HOTSPOT) "🚨" else if (cam.camera.type == CameraType.INTERVAL) "⏱️" else "📸"
                 floatCameraTitleTv?.text = "$icon ${cam.camera.type.label}"
                 floatCameraDistanceTv?.text = CameraAlertPolicy.distanceLabel(cam.distanceMeters)
+                floatCameraDistanceTv?.visibility = View.VISIBLE
+            } else if (currentZone != null && (currentZone.state == IntervalSpeedTracker.State.IN_ZONE || currentZone.state == IntervalSpeedTracker.State.APPROACHING_END)) {
+                floatSpeedLimitTv?.text = "${currentZone.camera?.speedLimit ?: "--"}"
+                floatCameraTitleTv?.text = "⏱️ 區間均速 ${currentZone.averageSpeedKmh} km/h"
+                floatCameraDistanceTv?.text = if (currentZone.isAverageOverspeed) "⚠️ 均速超速！" else "剩餘 ${currentZone.remainingSeconds} 秒"
                 floatCameraDistanceTv?.visibility = View.VISIBLE
             } else if (tunnel != null && tunnel.isApproachingEntrance) {
                 floatSpeedLimitTv?.text = "90"

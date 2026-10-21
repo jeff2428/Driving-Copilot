@@ -97,4 +97,57 @@ assert th_freeway == (1000.0, 400.0, 550.0), f"國道閾值不符: {th_freeway}"
 th_local = get_thresholds("中正路100號", 50, 45)
 assert th_local == (420.0, 180.0, 280.0), f"市區閾值不符: {th_local}"
 
+
+# 5. 驗證向量通過門閥 (Vector Pass Gate) 跨平台一致性
+def is_camera_passed_by_vector(current_dist, rel_angle_deg, min_approached_dist, is_freeway_or_elevated):
+    approach_limit = 80.0 if is_freeway_or_elevated else 45.0
+    if min_approached_dist > approach_limit:
+        return False
+    rad = math.radians(rel_angle_deg)
+    along_track = current_dist * math.cos(rad)
+    cross_track = current_dist * math.sin(rad)
+    passed_orthogonal = (along_track <= -5.0) and (abs(cross_track) <= 40.0)
+    passed_side = (rel_angle_deg > 95.0) and (current_dist <= 35.0)
+    return passed_orthogonal or passed_side
+
+# 山路急彎 (北宜公路 33K)：夾角轉至 85 度但車距相機仍有 120m -> 絕不觸發通過
+assert not is_camera_passed_by_vector(120.0, 85.0, 110.0, False), "山路急彎不可誤鳴通過"
+
+# 真實通過相機門架 (車頭已前進越過相機 -6m，偏距 8m，且曾逼近至 10m) -> 確切觸發通過
+assert is_camera_passed_by_vector(10.0, 145.0, 8.0, False), "真實通過應判定為 True"
+
+# 6. 驗證全台高架快速道路識別 (Elevated Expressway) 跨平台一致性
+ELEVATED_REGEX = re.compile(r"高架|快速|台6[1-8]|台7[2-8]|台8[2-8]|市民大道高架|建國高架|新生高架|洲美|環河快|環東|水源快速")
+
+def is_elevated_road(address):
+    if any(k in address for k in ["路口", "街口", "巷口", "平面", "機慢車", "橋下"]):
+        return False
+    return bool(ELEVATED_REGEX.search(address))
+
+assert is_elevated_road("市民大道高架東向12K"), "市民大道高架應為高架道路"
+assert is_elevated_road("台64線快速公路西向18K"), "台64應為高架快速道路"
+assert not is_elevated_road("市民大道四段與延吉街口"), "市民大道平面路口不應為高架道路"
+assert not is_elevated_road("建國南路二段平面車道"), "平面車道不應為高架道路"
+
+# 7. 驗證科技執法細分項目 (Tech Enforcement Disambiguation) 跨平台一致性
+def parse_tech_type(text):
+    if "闖紅燈" in text or "紅燈" in text:
+        return "取締闖紅燈"
+    if "不停讓" in text or "未禮讓" in text or "行人" in text:
+        return "取締未禮讓行人"
+    if "雙白線" in text or "跨越" in text:
+        return "取締跨越雙白線"
+    if any(k in text for k in ["標誌", "標線", "轉彎", "左轉"]):
+        return "取締違規轉彎與標線"
+    if any(k in text for k in ["違停", "停車", "臨停"]):
+        return "取締違規停車"
+    if "公車" in text or "專用道" in text:
+        return "取締佔用專用道"
+    return "多功能科技執法"
+
+assert parse_tech_type("中正路與中山路口(取締闖紅燈)") == "取締闖紅燈"
+assert parse_tech_type("忠孝東路五段(未禮讓行人取締)") == "取締未禮讓行人"
+assert parse_tech_type("信義路公車專用道") == "取締佔用專用道"
+assert parse_tech_type("復興北路地下道(跨越雙白線取締)") == "取締跨越雙白線"
+
 print("✅ 所有 iOS 數學模型與幾何演算法測試通過，100% 與 Android 對齊！")

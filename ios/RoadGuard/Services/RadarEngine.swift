@@ -286,10 +286,15 @@ public final class RadarEngine: ObservableObject {
                 let curBearing = GeoUtils.bearingDeg(lat1: currentLat, lng1: currentLng, lat2: trackedCam.lat, lng2: trackedCam.lng)
                 let curRelAngle = GeoUtils.angleDiff(currentBearingDeg, curBearing)
 
-                let passedByAngle = approachingCameraMinDist <= 220.0 && curRelAngle > 72.0
-                let passedByDistIncrease = approachingCameraMinDist <= 140.0 && curDist > approachingCameraMinDist + 16.0
+                let isHighSpeed = CameraAlertPolicy.isFreeway(camera: trackedCam) || CameraAlertPolicy.isElevatedRoad(camera: trackedCam)
+                let isPassed = CameraAlertPolicy.isCameraPassedByVector(
+                    currentDist: curDist,
+                    relAngleDeg: curRelAngle,
+                    minApproachedDist: approachingCameraMinDist,
+                    isFreewayOrElevated: isHighSpeed
+                )
 
-                if passedByAngle || passedByDistIncrease {
+                if isPassed {
                     if canAlert {
                         voiceEngine.playCameraPassedChime()
                     }
@@ -331,19 +336,21 @@ public final class RadarEngine: ObservableObject {
             let relAngle = GeoUtils.angleDiff(currentBearingDeg, targetBearing)
             let crossTrack = GeoUtils.crossTrackDistanceMeters(distanceMeters: dist, relativeAngleDeg: relAngle)
 
-            // 國道/快速道路 vs 平面道路立體分流
-            let isFreewayCam = CameraAlertPolicy.isFreeway(camera: cam) || cam.address.contains("高架") ||
-                              cam.address.contains("快速") || cam.speedLimit >= 80
+            // 國道/快速/高架道路 vs 平面道路立體分流
+            let isFreewayCam = CameraAlertPolicy.isFreeway(camera: cam) || CameraAlertPolicy.isElevatedRoad(camera: cam) ||
+                              cam.address.contains("高架") || cam.address.contains("快速") || cam.speedLimit >= 80
             let isRampCam = cam.address.contains("匝道") || cam.address.contains("出口") ||
                             cam.address.contains("入口") || cam.address.contains("交流道")
 
-            if currentSpeedKmh >= 82 && cam.speedLimit <= 50 && !isFreewayCam && !isRampCam {
-                continue
+            if (currentSpeedKmh >= 60 && CameraAlertPolicy.isElevatedRoad(camera: cam)) || (currentSpeedKmh >= 82) {
+                if cam.speedLimit <= 50 && !isFreewayCam && !isRampCam {
+                    continue
+                }
             }
-            if !isSimulating && !insideHsuehshan && currentSpeedKmh >= 1 && currentSpeedKmh <= 48 &&
-               cam.speedLimit >= 100 && CameraAlertPolicy.isFreeway(camera: cam) && !isRampCam &&
-               approachingCameraId != cam.id {
-                continue
+            if currentSpeedKmh >= 1 && currentSpeedKmh <= 48 && (CameraAlertPolicy.isElevatedRoad(camera: cam) || cam.speedLimit >= 80) && !isRampCam {
+                if !isSimulating && !insideHsuehshan && approachingCameraId != cam.id {
+                    continue
+                }
             }
 
             if useDirectionalFilter {
@@ -456,7 +463,13 @@ public final class RadarEngine: ObservableObject {
         }
 
         if canAlert, let ev = alertEvent {
-            voiceEngine.checkAndAnnounceRoadEvent(event: ev.event, distanceMeters: ev.distanceMeters)
+            let isOver = nearestCam != nil && currentSpeedKmh > (nearestCam!.camera.speedLimit + voiceEngine.overspeedToleranceKmh)
+            let shouldFuse = nearestCam != nil && nearestCam!.distanceMeters <= 450.0 && ev.distanceMeters <= 600.0
+            if shouldFuse {
+                voiceEngine.announceFusedAlert(camera: nearestCam!.camera, cameraDist: nearestCam!.distanceMeters, event: ev.event, isOver: isOver)
+            } else {
+                voiceEngine.checkAndAnnounceRoadEvent(event: ev.event, distanceMeters: ev.distanceMeters)
+            }
         }
 
         let isOverspeed = nearestCam != nil && currentSpeedKmh > (nearestCam!.camera.speedLimit + voiceEngine.overspeedToleranceKmh)
