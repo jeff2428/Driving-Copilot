@@ -7,6 +7,7 @@ import android.annotation.SuppressLint
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -68,6 +69,7 @@ class RoadGuardService : Service(), LocationListener {
     private var floatSpeedLimitTv: TextView? = null
     private var floatCurrentSpeedTv: TextView? = null
     private var floatCameraTitleTv: TextView? = null
+    private var floatCameraDistanceTv: TextView? = null
     private var floatRoadAlertTv: TextView? = null
     private var floatContainerBg: GradientDrawable? = null
     private var floatToggleHintTv: TextView? = null
@@ -596,6 +598,10 @@ class RoadGuardService : Service(), LocationListener {
         val now = System.currentTimeMillis()
         val canAlert = isDrivingActive || isSimulating || navEngine.isNavigating
         val activeNavRoutePoints = if (navEngine.isNavigating) navEngine.activeRoute?.routePoints else null
+        val validNavRoutePoints = activeNavRoutePoints?.takeIf { it.size >= 2 }
+        val vehicleDistanceToRoute = validNavRoutePoints?.let {
+            minDistanceToPolyline(currentLat, currentLng, it)
+        }
         val insideHsuehshan = GeoUtils.isInsideHsuehshanTunnel(currentLat, currentLng)
 
         // 清理過期的已通過測速桿冷卻紀錄 (65 秒後釋放)
@@ -655,7 +661,7 @@ class RoadGuardService : Service(), LocationListener {
             val crossTrack = GeoUtils.crossTrackDistanceMeters(dist, relAngle)
 
             // 國道/快速道路 vs 一般平面道路 車速與道路等級智慧分流 (避免橋上抓橋下、橋下抓橋上)
-            val isFreewayCam = cam.address.contains("國道") || cam.address.contains("高架") ||
+            val isFreewayCam = CameraAlertPolicy.isFreeway(cam) || cam.address.contains("高架") ||
                     cam.address.contains("快速") || cam.speedLimit >= 80
             val isRampCam = cam.address.contains("匝道") || cam.address.contains("出口") ||
                     cam.address.contains("入口") || cam.address.contains("交流道")
@@ -664,11 +670,15 @@ class RoadGuardService : Service(), LocationListener {
                 // 高速行駛於國道/快速道路時，排除橋下速限 <= 50 之市區平面測速桿
                 continue
             }
-            if (!isSimulating && !insideHsuehshan && currentSpeedKmh in 1..48 &&
-                cam.speedLimit >= 100 && cam.address.contains("國道") && !isRampCam &&
-                approachingCameraId != cam.id
-            ) {
-                // 低速行駛於平面道路時，排除國道主線速限 >= 100 之測速桿
+            val cameraDistanceToRoute = validNavRoutePoints?.let {
+                minDistanceToPolyline(cam.lat, cam.lng, it)
+            }
+            val onNavigationCorridor = CameraAlertPolicy.isOnNavigationCorridor(
+                cameraDistanceToRoute, vehicleDistanceToRoute
+            )
+            if (CameraAlertPolicy.excludeAtLowSpeed(cam, currentSpeedKmh, isSimulating,
+                    insideHsuehshan, approachingCameraId == cam.id, onNavigationCorridor)) {
+                // 導航走廊確認的國道測速點，塞車低速時仍保持提醒。
                 continue
             }
 
@@ -693,7 +703,7 @@ class RoadGuardService : Service(), LocationListener {
                 }
                 // (C) 若正在進行軟體內建導航，確保測速桿位於導航路線走廊 (45m) 內
                 if (!activeNavRoutePoints.isNullOrEmpty() && dist <= 1500.0) {
-                    val distToRoute = minDistanceToPolyline(cam.lat, cam.lng, activeNavRoutePoints)
+                    val distToRoute = cameraDistanceToRoute ?: minDistanceToPolyline(cam.lat, cam.lng, activeNavRoutePoints)
                     if (distToRoute > 45.0) continue
                 }
             }
@@ -711,11 +721,7 @@ class RoadGuardService : Service(), LocationListener {
 
         // 依測速桿速限與目前車速決定有效鎖定半徑（避免市區 40km/h 測速桿在 1 公里外過早鎖定）
         val nearestCam = candidateCameras.firstOrNull { sc ->
-            val maxLockRadius = when {
-                sc.camera.speedLimit >= 80 || currentSpeedKmh >= 82 -> 1150.0
-                sc.camera.speedLimit >= 60 || currentSpeedKmh >= 58 -> 750.0
-                else -> 500.0
-            }
+            val maxLockRadius = CameraAlertPolicy.lockRadiusMeters(sc.camera, currentSpeedKmh)
             sc.distanceMeters <= maxLockRadius
         }
 
@@ -948,10 +954,7 @@ class RoadGuardService : Service(), LocationListener {
             gravity = Gravity.CENTER_HORIZONTAL
         }
 
-        val mainPill = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(8), dp(12), dp(8))
+        val mainPill = FloatingOverlayView(this).apply {
             floatContainerBg = GradientDrawable().apply {
                 setColor(Color.parseColor("#EA0B132B"))
                 cornerRadius = dp(22).toFloat()
@@ -960,81 +963,13 @@ class RoadGuardService : Service(), LocationListener {
             background = floatContainerBg
         }
 
-        // 左側：台灣紅圈白底速限牌
-        val limitTv = TextView(this).apply {
-            text = "60"
-            setTextColor(Color.BLACK)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            width = dp(46)
-            height = dp(46)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.WHITE)
-                setStroke(dp(5), Color.parseColor("#E63946"))
-            }
-        }
-        floatSpeedLimitTv = limitTv
-        mainPill.addView(limitTv)
-
-        // 中間：目前 GPS 時速
-        val speedCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(10), 0, dp(10), 0)
-        }
-        val speedValTv = TextView(this).apply {
-            text = "0"
-            setTextColor(Color.parseColor("#00F5D4"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-        }
-        val speedUnitTv = TextView(this).apply {
-            text = "km/h"
-            setTextColor(Color.parseColor("#94A3B8"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            gravity = Gravity.CENTER
-        }
-        floatCurrentSpeedTv = speedValTv
-        speedCol.addView(speedValTv)
-        speedCol.addView(speedUnitTv)
-        mainPill.addView(speedCol)
-
-        // 右側：上排測速倒數 + 下排道路施工/封閉警示
-        val infoCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        val camTv = TextView(this).apply {
-            text = "📸 測速雷達待命中"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            typeface = Typeface.DEFAULT_BOLD
-            maxLines = 1
-        }
-        val roadTv = TextView(this).apply {
-            text = "🚧 前方無施工封閉"
-            setTextColor(Color.parseColor("#FBBF24"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            maxLines = 1
-        }
-        floatCameraTitleTv = camTv
-        floatRoadAlertTv = roadTv
-        infoCol.addView(camTv)
-        infoCol.addView(roadTv)
-        mainPill.addView(infoCol)
-
-        // 展開提示箭頭小圖示
-        val toggleHintTv = TextView(this).apply {
-            text = " ▾ "
-            setTextColor(Color.parseColor("#94A3B8"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(dp(4), dp(2), dp(2), dp(2))
-        }
+        floatSpeedLimitTv = mainPill.speedLimit
+        floatCurrentSpeedTv = mainPill.currentSpeed
+        floatCameraTitleTv = mainPill.cameraTitle
+        floatCameraDistanceTv = mainPill.cameraDistanceText
+        floatRoadAlertTv = mainPill.roadAlert
+        val toggleHintTv = mainPill.toggleHint
         floatToggleHintTv = toggleHintTv
-        mainPill.addView(toggleHintTv)
         root.addView(mainPill)
 
         // -------------------------------------------------------------
@@ -1102,6 +1037,13 @@ class RoadGuardService : Service(), LocationListener {
         actionsBar.addView(btnClose)
         root.addView(actionsBar)
 
+        // 文字換行或螢幕旋轉使視窗改變尺寸時，維持貼邊把手或完整可見的位置。
+        root.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                keepFloatingOverlayInBounds()
+            }
+        }
+
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
@@ -1166,7 +1108,7 @@ class RoadGuardService : Service(), LocationListener {
 
                         // 限制 Y 座標：確保在狀態列下方與虛擬導航列上方
                         val minY = dp(24)
-                        val maxY = dm.heightPixels - dp(70)
+                        val maxY = (dm.heightPixels - root.height - dp(24)).coerceAtLeast(minY)
                         params.y = (initialY + dy).coerceIn(minY, maxY)
 
                         try {
@@ -1277,11 +1219,47 @@ class RoadGuardService : Service(), LocationListener {
         floatingParams = null
         actionsBarView = null
         floatToggleHintTv = null
+        floatSpeedLimitTv = null
+        floatCurrentSpeedTv = null
+        floatCameraTitleTv = null
+        floatCameraDistanceTv = null
+        floatRoadAlertTv = null
     }
 
     fun isFloatingOverlayShowing(): Boolean = floatingRootView != null
 
     private var lastStartDrivingTime = 0L
+
+    private fun keepFloatingOverlayInBounds() {
+        val root = floatingRootView ?: return
+        val params = floatingParams ?: return
+        if (root.width == 0 || root.height == 0) return
+        val dm = resources.displayMetrics
+        val margin = (16 * dm.density).toInt()
+        val handle = (46 * dm.density).toInt()
+        val fullyVisibleRight = (dm.widthPixels - root.width - margin).coerceAtLeast(0)
+        val targetX = when {
+            dockState == DockSide.LEFT && !autoExpandedForAlert -> -(root.width - handle).coerceAtLeast(0)
+            dockState == DockSide.RIGHT && !autoExpandedForAlert -> dm.widthPixels - handle
+            dockState == DockSide.RIGHT -> fullyVisibleRight
+            else -> params.x.coerceIn(0, fullyVisibleRight)
+        }
+        val minY = (24 * dm.density).toInt()
+        val maxY = (dm.heightPixels - root.height - minY).coerceAtLeast(minY)
+        val targetY = params.y.coerceIn(minY, maxY)
+        if (params.x != targetX || params.y != targetY) {
+            overlayAnimator?.cancel()
+            params.x = targetX
+            params.y = targetY
+            try { windowManager?.updateViewLayout(root, params) } catch (_: Exception) {}
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // 420dp 的浮窗在部分裝置旋轉後尺寸不變，仍必須重新檢查位置。
+        floatingRootView?.post { keepFloatingOverlayInBounds() }
+    }
 
     fun startDrivingMode() {
         val now = System.currentTimeMillis()
@@ -1325,15 +1303,13 @@ class RoadGuardService : Service(), LocationListener {
             floatCurrentSpeedTv?.text = "${snap.speedKmh}"
 
             val nav = snap.navState
-            val isNav = nav != null && nav.isNavigating
-
             val hasDangerAlert = snap.isOverspeed ||
-                (snap.nearestCamera != null && snap.nearestCamera.distanceMeters <= 500.0) ||
+                snap.nearestCamera != null ||
                 (snap.nearestRoadEvent != null && snap.nearestRoadEvent.event.severity == EventSeverity.CLOSURE && snap.nearestRoadEvent.distanceMeters <= 1000.0) ||
                 snap.inIntervalZone ||
                 (snap.tunnelLaneAdvice != null && snap.tunnelLaneAdvice.isApproachingEntrance)
 
-            // 貼邊收折狀態下，若偵測到超速、前方500m內有測速照相、道路封閉或即將進雪隧，自動滑出展開以保行車安全；危機解除後自動縮回貼邊
+            // 鎖定測速點即展開，讓第一階段提醒時也能看到距離；通過後恢復貼邊。
             if (dockState != DockSide.NONE) {
                 if (hasDangerAlert && !autoExpandedForAlert) {
                     autoExpandedForAlert = true
@@ -1368,18 +1344,21 @@ class RoadGuardService : Service(), LocationListener {
 
             val tunnel = snap.tunnelLaneAdvice
             val cam = snap.nearestCamera
-            if (tunnel != null && tunnel.isApproachingEntrance) {
+            floatCameraDistanceTv?.visibility = View.GONE
+            floatCameraDistanceTv?.text = ""
+            if (cam != null) {
+                floatSpeedLimitTv?.text = "${cam.camera.speedLimit}"
+                val icon = if (cam.camera.type == CameraType.HOTSPOT) "🚨" else "📸"
+                floatCameraTitleTv?.text = "$icon ${cam.camera.type.label}"
+                floatCameraDistanceTv?.text = CameraAlertPolicy.distanceLabel(cam.distanceMeters)
+                floatCameraDistanceTv?.visibility = View.VISIBLE
+            } else if (tunnel != null && tunnel.isApproachingEntrance) {
                 floatSpeedLimitTv?.text = "90"
                 val chosenSpeed = if (tunnel.recommendedLane == "inner") tunnel.innerSpeedKmh else tunnel.outerSpeedKmh
                 val speedStr = if (chosenSpeed != null && chosenSpeed > 0) " (${chosenSpeed}km/h)" else ""
                 floatCameraTitleTv?.text = "🚇 建議走${tunnel.recommendedLaneName}$speedStr"
-            } else if (cam != null && (cam.distanceMeters <= 500.0 || !isNav)) {
-                floatSpeedLimitTv?.text = "${cam.camera.speedLimit}"
-                val icon = if (cam.camera.type == CameraType.HOTSPOT) "🚨" else "📸"
-                floatCameraTitleTv?.text =
-                    "$icon ${cam.distanceMeters.roundToInt()}m | ${cam.camera.type.label}"
             } else if (nav != null && nav.isNavigating) {
-                floatSpeedLimitTv?.text = if (cam != null) "${cam.camera.speedLimit}" else "--"
+                floatSpeedLimitTv?.text = "--"
                 val distKmStr = String.format("%.1f", nav.remainingDistanceMeters / 1000.0)
                 floatCameraTitleTv?.text = "🧭 ${nav.currentRoadName} (${distKmStr}km)"
             } else {

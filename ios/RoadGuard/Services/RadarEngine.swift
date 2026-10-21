@@ -332,7 +332,7 @@ public final class RadarEngine: ObservableObject {
             let crossTrack = GeoUtils.crossTrackDistanceMeters(distanceMeters: dist, relativeAngleDeg: relAngle)
 
             // 國道/快速道路 vs 平面道路立體分流
-            let isFreewayCam = cam.address.contains("國道") || cam.address.contains("高架") ||
+            let isFreewayCam = CameraAlertPolicy.isFreeway(camera: cam) || cam.address.contains("高架") ||
                               cam.address.contains("快速") || cam.speedLimit >= 80
             let isRampCam = cam.address.contains("匝道") || cam.address.contains("出口") ||
                             cam.address.contains("入口") || cam.address.contains("交流道")
@@ -341,7 +341,7 @@ public final class RadarEngine: ObservableObject {
                 continue
             }
             if !isSimulating && !insideHsuehshan && currentSpeedKmh >= 1 && currentSpeedKmh <= 48 &&
-               cam.speedLimit >= 100 && cam.address.contains("國道") && !isRampCam &&
+               cam.speedLimit >= 100 && CameraAlertPolicy.isFreeway(camera: cam) && !isRampCam &&
                approachingCameraId != cam.id {
                 continue
             }
@@ -374,14 +374,7 @@ public final class RadarEngine: ObservableObject {
         let mapVisibleCamerasList = Array(mapVisibleCams.prefix(75).map { $0.camera })
 
         let nearestCam = candidateCameras.first { sc in
-            let maxLockRadius: Double
-            if sc.camera.speedLimit >= 80 || currentSpeedKmh >= 82 {
-                maxLockRadius = 1150.0
-            } else if sc.camera.speedLimit >= 60 || currentSpeedKmh >= 58 {
-                maxLockRadius = 750.0
-            } else {
-                maxLockRadius = 500.0
-            }
+            let maxLockRadius = CameraAlertPolicy.lockRadiusMeters(camera: sc.camera, speedKmh: currentSpeedKmh)
             return sc.distanceMeters <= maxLockRadius
         }
 

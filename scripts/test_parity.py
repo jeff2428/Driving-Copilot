@@ -1,3 +1,4 @@
+import re
 import math
 
 EARTH_RADIUS = 6371000.0
@@ -60,5 +61,40 @@ assert ct < 48.0, f"偏距過大: {ct}"
 rel_ang_neighbor = 20.0
 ct_neighbor = cross_track_distance(dist, rel_ang_neighbor)
 assert ct_neighbor > 48.0, f"隔壁道路未剔除: {ct_neighbor}"
+
+
+# 4. 驗證國道辨識與 1000m / 400m 預警閾值跨平台一致性
+FREEWAY_REGEX = re.compile(r"國道[一二三四五六七八九十0-9]|國[一二三四五六七八九十0-9]|高速公路")
+
+def is_freeway(address, city=""):
+    if "路口" in address or "機慢車" in address or "方向" in address:
+        return False
+    if city.startswith("國道"):
+        return True
+    return bool(FREEWAY_REGEX.search(address))
+
+def get_thresholds(address, speed_limit, speed_kmh, city=""):
+    if is_freeway(address, city):
+        return (1000.0, 400.0, 550.0)
+    elif speed_limit >= 80 or speed_kmh >= 80:
+        return (900.0, 380.0, 550.0)
+    elif speed_limit >= 60 or speed_kmh >= 60:
+        return (600.0, 260.0, 400.0)
+    else:
+        return (420.0, 180.0, 280.0)
+
+assert is_freeway("國道一號南向306.1公里"), "國道一號應判定為國道"
+assert is_freeway("中山高速公路南下50公里"), "中山高應判定為國道"
+assert is_freeway("國3南下100公里"), "國3應判定為國道"
+assert not is_freeway("中正東路往國道二號方向"), "往國道方向引道不應判定為國道"
+assert not is_freeway("三商街高速公路口機慢車專用道往南415公尺處"), "機慢車專用道路口不應判定為國道"
+
+# 國道固定與經常出沒點：1000m 初報、400m 逼近警報
+th_freeway = get_thresholds("國道一號南向306.1公里", 110, 105)
+assert th_freeway == (1000.0, 400.0, 550.0), f"國道閾值不符: {th_freeway}"
+
+# 市區道路 (速限 50) 閾值保持不變
+th_local = get_thresholds("中正路100號", 50, 45)
+assert th_local == (420.0, 180.0, 280.0), f"市區閾值不符: {th_local}"
 
 print("✅ 所有 iOS 數學模型與幾何演算法測試通過，100% 與 Android 對齊！")

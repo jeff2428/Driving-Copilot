@@ -155,17 +155,9 @@ public final class VoiceAlertEngine: NSObject, ObservableObject, AVSpeechSynthes
             return
         }
 
-        let (stage1Dist, stage2Dist, overspeedBeepDist): (Double, Double, Double) = {
-            if camera.speedLimit >= 80 || currentSpeedKmh >= 80 {
-                return (900.0, 380.0, 550.0)
-            } else if camera.speedLimit >= 60 || currentSpeedKmh >= 60 {
-                return (600.0, 260.0, 400.0)
-            } else {
-                return (420.0, 180.0, 280.0)
-            }
-        }()
+        let thresholds = CameraAlertPolicy.thresholds(camera: camera, speedKmh: currentSpeedKmh)
+        let (stage1Dist, stage2Dist, overspeedBeepDist) = (thresholds.farMeters, thresholds.nearMeters, thresholds.beepMeters)
 
-        let distInt = max(50, Int(distanceMeters / 50.0) * 50)
         let stage: Int
         if distanceMeters <= stage2Dist {
             stage = 2
@@ -184,29 +176,7 @@ public final class VoiceAlertEngine: NSObject, ObservableObject, AVSpeechSynthes
             voiceLock.unlock()
 
             let isOver = currentSpeedKmh > (camera.speedLimit + overspeedToleranceKmh)
-            let isHotspot = camera.type == .hotspot
-            let msg: String
-            if stage == 1 {
-                if isHotspot {
-                    msg = "注意，前方 \(distInt) 公尺，經常出沒移動式測速，速限 \(camera.speedLimit) 公里"
-                } else {
-                    msg = "注意，前方 \(distInt) 公尺，有\(camera.type.label)，速限 \(camera.speedLimit) 公里"
-                }
-            } else {
-                if isOver {
-                    if isHotspot {
-                        msg = "警告！前方 \(distInt) 公尺經常出沒移動測速，速限 \(camera.speedLimit) 公里，您目前已超速，請立即減速！"
-                    } else {
-                        msg = "警告！前方 \(distInt) 公尺測速照相，速限 \(camera.speedLimit) 公里，您目前已超速，請立即減速！"
-                    }
-                } else {
-                    if isHotspot {
-                        msg = "接近經常出沒測速點，速限 \(camera.speedLimit) 公里"
-                    } else {
-                        msg = "接近\(camera.type.label)，速限 \(camera.speedLimit) 公里"
-                    }
-                }
-            }
+            let msg = CameraAlertPolicy.message(camera: camera, stage: stage, distanceMeters: distanceMeters, isOver: isOver)
             speakNow(text: msg, urgentTone: isOver)
         } else {
             voiceLock.unlock()

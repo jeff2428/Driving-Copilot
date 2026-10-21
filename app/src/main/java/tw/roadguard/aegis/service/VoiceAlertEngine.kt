@@ -47,8 +47,7 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
 
     // 紀錄已播報過的階段 (1=遠距初報, 2=近距提醒)
     private val announcedEventStages = ConcurrentHashMap<String, Int>()
-    private val announcedCameraStages = ConcurrentHashMap<String, Int>()
-    private val lastCameraDistances = ConcurrentHashMap<String, Double>()
+    private val cameraAlertTracker = CameraAlertTracker()
     private var announcedTunnelDirection: String? = null
     private var lastOverspeedBeepTime = 0L
 
@@ -148,51 +147,11 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         if (!isVoiceEnabled) return
         if (camera.type == CameraType.HOTSPOT && !isHotspotAlertEnabled) return
 
-        val prevDist = lastCameraDistances.put(camera.id, distanceMeters)
-        // 若距離明顯正在拉遠 (> 6 公尺)，代表並非接近中，不觸發新語音階段
-        val isMovingAway = prevDist != null && distanceMeters > prevDist + 6.0
-        if (isMovingAway) return
-
-        val (stage1Dist, stage2Dist, overspeedBeepDist) = when {
-            camera.speedLimit >= 80 || currentSpeedKmh >= 80 -> Triple(900.0, 380.0, 550.0)
-            camera.speedLimit >= 60 || currentSpeedKmh >= 60 -> Triple(600.0, 260.0, 400.0)
-            else -> Triple(420.0, 180.0, 280.0)
-        }
-
-        val distInt = ((distanceMeters / 50).toInt() * 50).coerceAtLeast(50)
-        val stage = when {
-            distanceMeters <= stage2Dist -> 2
-            distanceMeters <= stage1Dist -> 1
-            else -> 0
-        }
-        if (stage == 0) return
-
-        val prevStage = announcedCameraStages[camera.id] ?: 0
-        if (stage > prevStage) {
-            announcedCameraStages[camera.id] = stage
+        val stage = cameraAlertTracker.update(camera, distanceMeters, currentSpeedKmh) ?: return
+        val overspeedBeepDist = CameraAlertPolicy.thresholds(camera, currentSpeedKmh).beepMeters
+        if (stage > 0) {
             val isOver = currentSpeedKmh > (camera.speedLimit + overspeedToleranceKmh)
-            val isHotspot = camera.type == CameraType.HOTSPOT
-            val msg = if (stage == 1) {
-                if (isHotspot) {
-                    "注意，前方 $distInt 公尺，經常出沒移動式測速，速限 ${camera.speedLimit} 公里"
-                } else {
-                    "注意，前方 $distInt 公尺，有${camera.type.label}，速限 ${camera.speedLimit} 公里"
-                }
-            } else {
-                if (isOver) {
-                    if (isHotspot) {
-                        "警告！前方 $distInt 公尺經常出沒移動測速，速限 ${camera.speedLimit} 公里，您目前已超速，請立即減速！"
-                    } else {
-                        "警告！前方 $distInt 公尺測速照相，速限 ${camera.speedLimit} 公里，您目前已超速，請立即減速！"
-                    }
-                } else {
-                    if (isHotspot) {
-                        "接近經常出沒測速點，速限 ${camera.speedLimit} 公里"
-                    } else {
-                        "接近${camera.type.label}，速限 ${camera.speedLimit} 公里"
-                    }
-                }
-            }
+            val msg = CameraAlertPolicy.message(camera, stage, distanceMeters, isOver)
             speakNow(msg, urgentTone = isOver)
         }
 
@@ -311,9 +270,8 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
     }
 
     fun resetMemory() {
-        announcedCameraStages.clear()
+        cameraAlertTracker.clear()
         announcedEventStages.clear()
-        lastCameraDistances.clear()
         resetTunnelAnnounced()
     }
 

@@ -507,3 +507,76 @@ public struct GeoUtils {
         return distanceMeters(lat1: pLat, lng1: pLng, lat2: projLat, lng2: projLng)
     }
 }
+
+// MARK: - 測速照相警報規則與策略 (與 Android CameraAlertPolicy 100% 對齊)
+public struct CameraAlertPolicy {
+    public struct Thresholds {
+        public let farMeters: Double
+        public let nearMeters: Double
+        public let beepMeters: Double
+
+        public init(farMeters: Double, nearMeters: Double, beepMeters: Double) {
+            self.farMeters = farMeters
+            self.nearMeters = nearMeters
+            self.beepMeters = beepMeters
+        }
+    }
+
+    private static let freewayRegex = try? NSRegularExpression(pattern: "國道[一二三四五六七八九十0-9]|國[一二三四五六七八九十0-9]|高速公路")
+
+    public static func isFreeway(camera: SpeedCamera) -> Bool {
+        let road = camera.address
+        if road.contains("路口") || road.contains("機慢車") || road.contains("方向") {
+            return false
+        }
+        if camera.city.hasPrefix("國道") {
+            return true
+        }
+        guard let regex = freewayRegex else {
+            return road.contains("國道") || road.contains("高速公路")
+        }
+        let range = NSRange(location: 0, length: road.utf16.count)
+        return regex.firstMatch(in: road, options: [], range: range) != nil
+    }
+
+    public static func thresholds(camera: SpeedCamera, speedKmh: Int) -> Thresholds {
+        if isFreeway(camera: camera) {
+            return Thresholds(farMeters: 1000.0, nearMeters: 400.0, beepMeters: 550.0)
+        } else if camera.speedLimit >= 80 || speedKmh >= 80 {
+            return Thresholds(farMeters: 900.0, nearMeters: 380.0, beepMeters: 550.0)
+        } else if camera.speedLimit >= 60 || speedKmh >= 60 {
+            return Thresholds(farMeters: 600.0, nearMeters: 260.0, beepMeters: 400.0)
+        } else {
+            return Thresholds(farMeters: 420.0, nearMeters: 180.0, beepMeters: 280.0)
+        }
+    }
+
+    public static func lockRadiusMeters(camera: SpeedCamera, speedKmh: Int) -> Double {
+        let originalRadius: Double
+        if camera.speedLimit >= 80 || speedKmh >= 82 {
+            originalRadius = 1150.0
+        } else if camera.speedLimit >= 60 || speedKmh >= 58 {
+            originalRadius = 750.0
+        } else {
+            originalRadius = 500.0
+        }
+        return max(originalRadius, thresholds(camera: camera, speedKmh: speedKmh).farMeters)
+    }
+
+    public static func distanceLabel(distanceMeters: Double) -> String {
+        if distanceMeters >= 1000.0 {
+            return String(format: "前方 %.1f 公里", distanceMeters / 1000.0)
+        } else {
+            return "前方 \(max(0, Int(distanceMeters.rounded()))) 公尺"
+        }
+    }
+
+    public static func message(camera: SpeedCamera, stage: Int, distanceMeters: Double, isOver: Bool) -> String {
+        let meters = max(50, Int(distanceMeters / 50.0) * 50)
+        let kind = camera.type == .hotspot ? "經常出沒移動式測速" : camera.type.label
+        let prefix = (stage == 1) ? "注意，" : (isOver ? "警告！" : "接近，")
+        let warning = (stage == 2 && isOver) ? "，您目前已超速，請立即減速！" : ""
+        return "\(prefix)前方 \(meters) 公尺，\(kind)，速限 \(camera.speedLimit) 公里\(warning)"
+    }
+}
+
