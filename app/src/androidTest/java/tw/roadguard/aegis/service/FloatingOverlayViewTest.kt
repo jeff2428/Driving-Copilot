@@ -20,6 +20,27 @@ class FloatingOverlayViewTest {
     @Test fun largeSystemFontAndKilometerDistance() = verifyLayout(320, 2.0f, "1.2", "公里")
     @Test fun wideLayout() = verifyLayout(420, 1.0f, "850", "公尺")
 
+    @Test fun compactSpeedModeMeasuresCompactWidthAndHidesAlertViews() = onMain {
+        val base = instrumentation.targetContext
+        val view = FloatingOverlayView(base)
+        view.applyConfig(OverlayDisplayConfig(OverlayMode.COMPACT_SPEED, "65", false))
+        view.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+
+        assertEquals("65", view.currentSpeed.text.toString())
+        assertEquals(View.GONE, view.speedLimit.visibility)
+        assertEquals(View.GONE, view.infoColumn.visibility)
+        assertEquals(View.GONE, view.cameraTitle.visibility)
+        assertEquals(View.GONE, view.cameraDistanceText.visibility)
+        assertEquals(View.GONE, view.roadAlert.visibility)
+        assertEquals(View.GONE, view.toggleHint.visibility)
+
+        val maxAllowedWidth = (120 * base.resources.displayMetrics.density).toInt()
+        assertTrue("Compact mode width ${view.measuredWidth} exceeds 120dp ($maxAllowedWidth)", view.measuredWidth <= maxAllowedWidth)
+        checkTextFits(view)
+    }
+
     private fun verifyLayout(widthDp: Int, fontScale: Float, distance: String, unit: String) = onMain {
         val base = instrumentation.targetContext
         val config = Configuration(base.resources.configuration).apply { this.fontScale = fontScale }

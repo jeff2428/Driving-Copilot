@@ -65,6 +65,7 @@ class RoadGuardService : Service(), LocationListener {
     private var locationManager: LocationManager? = null
     private var windowManager: WindowManager? = null
     private var floatingRootView: View? = null
+    private var floatingMainPill: FloatingOverlayView? = null
     private var floatingParams: WindowManager.LayoutParams? = null
 
     // 懸浮視窗內部元件
@@ -1187,6 +1188,7 @@ class RoadGuardService : Service(), LocationListener {
         return try {
             windowManager?.addView(root, params)
             floatingRootView = root
+            floatingMainPill = mainPill
             floatingParams = params
             updateFloatingOverlayUi(latestSnapshot)
             true
@@ -1240,6 +1242,7 @@ class RoadGuardService : Service(), LocationListener {
         } catch (_: Exception) {
         }
         floatingRootView = null
+        floatingMainPill = null
         floatingParams = null
         actionsBarView = null
         floatToggleHintTv = null
@@ -1324,14 +1327,14 @@ class RoadGuardService : Service(), LocationListener {
     private fun updateFloatingOverlayUi(snap: RadarSnapshot) {
         if (floatingRootView == null) return
         mainHandler.post {
-            floatCurrentSpeedTv?.text = "${snap.speedKmh}"
+            val config = OverlayStateEvaluator.evaluate(snap, currentZoneStatus)
+            floatingMainPill?.applyConfig(config)
 
-            val nav = snap.navState
-            val hasDangerAlert = snap.isOverspeed ||
-                snap.nearestCamera != null ||
-                (snap.nearestRoadEvent != null && snap.nearestRoadEvent.event.severity == EventSeverity.CLOSURE && snap.nearestRoadEvent.distanceMeters <= 1000.0) ||
-                snap.inIntervalZone ||
-                (snap.tunnelLaneAdvice != null && snap.tunnelLaneAdvice.isApproachingEntrance)
+            if (dockState != DockSide.NONE && !autoExpandedForAlert) {
+                floatToggleHintTv?.visibility = View.VISIBLE
+            }
+
+            val hasDangerAlert = config.mode == OverlayMode.ALERT
 
             // 鎖定測速點即展開，讓第一階段提醒時也能看到距離；通過後恢復貼邊。
             if (dockState != DockSide.NONE) {
@@ -1366,70 +1369,11 @@ class RoadGuardService : Service(), LocationListener {
                 }
             }
 
-            val tunnel = snap.tunnelLaneAdvice
-            val cam = snap.nearestCamera
-            floatCameraDistanceTv?.visibility = View.GONE
-            floatCameraDistanceTv?.text = ""
-            val currentZone = currentZoneStatus
-            if (cam != null) {
-                floatSpeedLimitTv?.text = "${cam.camera.speedLimit}"
-                val icon = if (cam.camera.type == CameraType.HOTSPOT) "🚨" else if (cam.camera.type == CameraType.INTERVAL) "⏱️" else "📸"
-                floatCameraTitleTv?.text = "$icon ${cam.camera.type.label}"
-                floatCameraDistanceTv?.text = CameraAlertPolicy.distanceLabel(cam.distanceMeters)
-                floatCameraDistanceTv?.visibility = View.VISIBLE
-            } else if (currentZone != null && (currentZone.state == IntervalSpeedTracker.State.IN_ZONE || currentZone.state == IntervalSpeedTracker.State.APPROACHING_END)) {
-                floatSpeedLimitTv?.text = "${currentZone.camera?.speedLimit ?: "--"}"
-                floatCameraTitleTv?.text = "⏱️ 區間均速 ${currentZone.averageSpeedKmh} km/h"
-                floatCameraDistanceTv?.text = if (currentZone.isAverageOverspeed) "⚠️ 均速超速！" else "剩餘 ${currentZone.remainingSeconds} 秒"
-                floatCameraDistanceTv?.visibility = View.VISIBLE
-            } else if (tunnel != null && tunnel.isApproachingEntrance) {
-                floatSpeedLimitTv?.text = "90"
-                val chosenSpeed = if (tunnel.recommendedLane == "inner") tunnel.innerSpeedKmh else tunnel.outerSpeedKmh
-                val speedStr = if (chosenSpeed != null && chosenSpeed > 0) " (${chosenSpeed}km/h)" else ""
-                floatCameraTitleTv?.text = "🚇 建議走${tunnel.recommendedLaneName}$speedStr"
-            } else if (nav != null && nav.isNavigating) {
-                floatSpeedLimitTv?.text = "--"
-                val distKmStr = String.format("%.1f", nav.remainingDistanceMeters / 1000.0)
-                floatCameraTitleTv?.text = "🧭 ${nav.currentRoadName} (${distKmStr}km)"
-            } else {
-                floatSpeedLimitTv?.text = if (dockState == DockSide.RIGHT && !autoExpandedForAlert) "◀" else "--"
-                floatCameraTitleTv?.text = "📸 前方無測速 (${snap.bearingLabel})"
-            }
-
-            val ev = snap.nearestRoadEvent
-            if (tunnel != null && tunnel.isApproachingEntrance) {
-                val distM = tunnel.distanceToEntranceMeters.roundToInt()
-                floatRoadAlertTv?.text = "⚠️ 距雪隧洞口 ${distM}m · 全程禁換車道"
-                floatRoadAlertTv?.setTextColor(Color.parseColor("#38BDF8"))
-            } else if (nav != null && nav.isNavigating) {
-                val turnDist = if (nav.distanceToNextTurnMeters >= 1000) {
-                    String.format("%.1fkm", nav.distanceToNextTurnMeters / 1000.0)
-                } else {
-                    "${nav.distanceToNextTurnMeters.roundToInt()}m"
-                }
-                floatRoadAlertTv?.text = "${nav.maneuverIcon} $turnDist ${nav.instruction.take(12)}"
-                floatRoadAlertTv?.setTextColor(Color.parseColor("#38BDF8"))
-            } else if (ev != null) {
-                val distLabel = if (ev.distanceMeters >= 1000) {
-                    String.format("%.1fkm", ev.distanceMeters / 1000.0)
-                } else {
-                    "${ev.distanceMeters.roundToInt()}m"
-                }
-                val icon = if (ev.event.severity == EventSeverity.CLOSURE) "🔴封閉" else "🟠施工"
-                floatRoadAlertTv?.text = "$icon $distLabel ${ev.event.roadName.take(10)}"
-                floatRoadAlertTv?.setTextColor(
-                    if (ev.event.severity == EventSeverity.CLOSURE) Color.parseColor("#FF4D6D")
-                    else Color.parseColor("#FBBF24")
-                )
-            } else {
-                floatRoadAlertTv?.text = "✅ 前方路線無施工封閉"
-                floatRoadAlertTv?.setTextColor(Color.parseColor("#34D399"))
-            }
-
             // 超速或遇到道路封閉時，懸浮視窗外框變紅警示
             val dp2 = TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, 2.5f, resources.displayMetrics
             ).toInt()
+            val ev = snap.nearestRoadEvent
             if (snap.isOverspeed) {
                 floatCurrentSpeedTv?.setTextColor(Color.parseColor("#FF2E4C"))
                 floatContainerBg?.setStroke(dp2, Color.parseColor("#FF2E4C"))
