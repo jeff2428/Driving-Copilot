@@ -1,6 +1,6 @@
 {
-  "version": "2026.10.26.0451",
-  "updatedAt": "2026/10/26 04:51",
+  "version": "2026.10.26.1246",
+  "updatedAt": "2026/10/26 12:46",
   "cameraCount": 1975,
   "intervalCameraCount": 67,
   "hotspotCameraCount": 72,
@@ -9,7 +9,7 @@
   "closureCount": 302,
   "constructionCount": 223,
   "sha256Cameras": "a5cf2c6df5fb50b54420a98fb6afdf684703ccf9ebd0f9354bb60b637dd33df6",
-  "sha256Events": "9e9fc4a1e10155c140cf99340f5f259cf1317d953f7c71823648d063bf0bfef9",
+  "sha256Events": "02595a1387178d5175635bbc02dea6ff758f17a9d9d85007549a7b509eae4455",
   "files": {
     "camerasCsv": "taiwan_cameras_latest.csv",
     "camerasJson": "taiwan_cameras_latest.json",
