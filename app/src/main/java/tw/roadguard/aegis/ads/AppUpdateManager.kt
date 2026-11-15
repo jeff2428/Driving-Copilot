@@ -2,14 +2,9 @@ package tw.roadguard.aegis.ads
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.app.DownloadManager
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
@@ -26,6 +21,20 @@ import java.net.URL
  * 3. 車主點擊「🚀 立即一鍵下載更新」，即透過 Android 系統 `DownloadManager` 下載最新 APK 並自動喚起安裝器覆蓋升級！
  */
 class AppUpdateManager(private val context: Context) {
+    companion object {
+        internal fun writeVerifiedApk(input: java.io.InputStream, file: java.io.File, expectedHash: String) {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            try {
+                java.security.DigestInputStream(input, digest).use { source ->
+                    file.outputStream().use { output -> source.copyTo(output) }
+                }
+                check(digest.digest().joinToString("") { "%02x".format(it) }.equals(expectedHash, true))
+            } catch (e: Exception) {
+                file.delete()
+                throw e
+            }
+        }
+    }
 
     val currentVersionCode: Int
         get() = try {
@@ -52,6 +61,7 @@ class AppUpdateManager(private val context: Context) {
         val versionName: String,
         val apkDownloadUrl: String,
         val releaseNotes: String,
+        val apkSha256: String,
         val forceUpdate: Boolean
     )
 
@@ -62,22 +72,10 @@ class AppUpdateManager(private val context: Context) {
      */
     fun checkForAppUpdate(
         activity: Activity,
-        githubRepoSlug: String,
         manualCheck: Boolean = false,
         proLicenseManager: ProLicenseManager? = null
     ) {
-        val target = if (githubRepoSlug.isBlank()) "jeff2428/Driving-Copilot" else githubRepoSlug
-        val slug = target.trim().removePrefix("https://github.com/").trim('/')
-        if (slug.isBlank() || !slug.contains("/")) {
-            if (manualCheck) {
-                Toast.makeText(
-                    activity,
-                    "目前已是最新版本 v$currentVersionName",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-            return
-        }
+        val slug = tw.roadguard.aegis.data.TaiwanOpenDataRepository.DEFAULT_REPO
 
         Thread {
             val baseCandidates = listOf(
@@ -111,7 +109,7 @@ class AppUpdateManager(private val context: Context) {
                     )
                     val notes = obj.optString("releaseNotes", "1. 優化全台測速照相與施工預警精準度\n2. 提升地圖流暢度")
                     val force = obj.optBoolean("forceUpdate", false)
-                    foundInfo = RemoteVersionInfo(vCode, vName, apkUrl, notes, force)
+                    foundInfo = RemoteVersionInfo(vCode, vName, apkUrl, notes, obj.optString("apkSha256"), force)
                     break
                 } catch (_: Exception) {
                 }
@@ -151,71 +149,51 @@ class AppUpdateManager(private val context: Context) {
     }
 
     private fun downloadAndInstallApk(activity: Activity, info: RemoteVersionInfo) {
-        try {
-            Toast.makeText(activity, "⏳ 正在背景下載新版 APK (v${info.versionName})，請稍候…", Toast.LENGTH_LONG).show()
-            val dm = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val fileName = "TW-RoadGuard-Aegis-v${info.versionName}.apk"
-            val req = DownloadManager.Request(Uri.parse(info.apkDownloadUrl))
-                .setTitle("神盾路況行車助手 v${info.versionName} 更新中")
-                .setDescription("下載完成後將自動開啟安裝畫面")
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-                .setAllowedOverMetered(true)
-                .setAllowedOverRoaming(true)
-
-            val downloadId = dm.enqueue(req)
-
-            val receiver = object : BroadcastReceiver() {
-                override fun onReceive(ctx: Context?, intent: Intent?) {
-                    val id = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) ?: -1L
-                    if (id == downloadId) {
-                        try {
-                            activity.unregisterReceiver(this)
-                        } catch (_: Exception) {
-                        }
-                        val uri = dm.getUriForDownloadedFile(downloadId)
-                        if (uri != null) {
-                            promptInstallApk(activity, uri, info.apkDownloadUrl)
-                        } else {
-                            openBrowserFallback(activity, info.apkDownloadUrl)
-                        }
+        if (!info.apkSha256.matches(Regex("[0-9a-fA-F]{64}"))) {
+            Toast.makeText(activity, "此版本缺少更新檔校驗資料，請稍後重試", Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(activity, "正在下載並驗證更新檔…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val directory = java.io.File(context.cacheDir, "updates")
+            var apk: java.io.File? = null
+            try {
+                directory.mkdirs()
+                val file = java.io.File.createTempFile("release-", ".apk", directory)
+                apk = file
+                val url = URL(info.apkDownloadUrl)
+                require(url.protocol == "https")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 10000
+                    readTimeout = 30000
+                }
+                try {
+                    check(conn.responseCode == 200)
+                    writeVerifiedApk(conn.inputStream, file, info.apkSha256)
+                } finally {
+                    conn.disconnect()
+                }
+                mainHandler.post {
+                    if (activity.isFinishing || activity.isDestroyed) {
+                        file.delete()
+                        return@post
+                    }
+                    try {
+                        val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".updates", file)
+                        activity.startActivity(Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, "application/vnd.android.package-archive")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        })
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        file.delete()
+                        Toast.makeText(activity, "無法開啟系統安裝程式", Toast.LENGTH_LONG).show()
                     }
                 }
+            } catch (_: Exception) {
+                apk?.delete()
+                mainHandler.post { Toast.makeText(activity, "下載或校驗失敗，請重試", Toast.LENGTH_LONG).show() }
             }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                activity.registerReceiver(
-                    receiver,
-                    IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-                    Context.RECEIVER_EXPORTED
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                activity.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
-            }
-        } catch (_: Exception) {
-            openBrowserFallback(activity, info.apkDownloadUrl)
-        }
-    }
-
-    private fun promptInstallApk(activity: Activity, apkUri: Uri, fallbackUrl: String) {
-        try {
-            val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(apkUri, "application/vnd.android.package-archive")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            activity.startActivity(installIntent)
-        } catch (_: Exception) {
-            openBrowserFallback(activity, fallbackUrl)
-        }
-    }
-
-    private fun openBrowserFallback(activity: Activity, url: String) {
-        try {
-            activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-        } catch (_: Exception) {
-            Toast.makeText(activity, "無法開啟更新連結：$url", Toast.LENGTH_LONG).show()
-        }
+        }.start()
     }
 
     private fun fetchText(urlStr: String): String {

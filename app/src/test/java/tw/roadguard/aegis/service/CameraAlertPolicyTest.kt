@@ -3,7 +3,10 @@ package tw.roadguard.aegis.service
 import org.junit.Assert.*
 import org.junit.Test
 import tw.roadguard.aegis.model.CameraType
+import tw.roadguard.aegis.model.EventSeverity
 import tw.roadguard.aegis.model.GeoUtils
+import tw.roadguard.aegis.model.RoadCategory
+import tw.roadguard.aegis.model.RoadEvent
 import tw.roadguard.aegis.model.SpeedCamera
 
 class CameraAlertPolicyTest {
@@ -12,6 +15,13 @@ class CameraAlertPolicyTest {
         address: String = "國道一號南向306.1公里",
         limit: Int = 110
     ) = SpeedCamera("test", "", "", address, "", 23.16412, 120.23150, "往南", limit, type)
+
+    private fun closure(summary: String) = RoadEvent(
+        uid = "ev1", roadName = "國道一號", areaName = "", direction = "",
+        lat = 23.164, lng = 120.231, rawComment = summary, voiceSummary = summary,
+        severity = EventSeverity.CLOSURE, category = RoadCategory.FREEWAY,
+        isCleared = false, isActiveNow = true, scheduleNote = "", happenTime = "", sourceDetail = ""
+    )
 
     @Test fun freewayFixedAndHotspotUseSameThresholdsEvenInTraffic() {
         for (type in listOf(CameraType.FIXED, CameraType.HOTSPOT)) {
@@ -94,23 +104,18 @@ class CameraAlertPolicyTest {
     }
 
     @Test fun mountainHairpinCurveDoesNotTriggerPassPrematurely() {
-        // 山路急彎：夾角突然轉到側後方 85 度，但直線距離仍在 120m (minApproachedDist = 110m)
         assertFalse(CameraAlertPolicy.isCameraPassedByVector(
             currentDist = 120.0,
             relAngleDeg = 85.0,
             minApproachedDist = 110.0,
             isFreewayOrElevated = false
         ))
-
-        // 真實通過平面道路測速桿 (曾逼近至 10m，目前距離 15m 夾角 160 度)
         assertTrue(CameraAlertPolicy.isCameraPassedByVector(
-            currentDist = 15.0,
-            relAngleDeg = 160.0,
-            minApproachedDist = 10.0,
+            currentDist = 10.0,
+            relAngleDeg = 145.0,
+            minApproachedDist = 8.0,
             isFreewayOrElevated = false
         ))
-
-        // 真實通過高架/國道路側門架 (曾逼近至 25m，目前距離 30m 夾角 150 度)
         assertTrue(CameraAlertPolicy.isCameraPassedByVector(
             currentDist = 30.0,
             relAngleDeg = 150.0,
@@ -138,5 +143,112 @@ class CameraAlertPolicyTest {
 
         val camBus = camera(type = CameraType.TECH, address = "信義路公車專用道")
         assertEquals(CameraAlertPolicy.TechType.SPECIAL_LANE, CameraAlertPolicy.parseTechEnforcementType(camBus))
+    }
+
+    @Test fun arbitratorOverspeedForcesEmergencyPriority() {
+        val cam = camera(limit = 100)
+        val event = closure("施工封閉")
+        val input = ArbitrationInput(
+            currentSpeedKmh = 115,
+            speedLimitKmh = 100,
+            distanceToCameraMeters = 300.0,
+            nearestCamera = cam,
+            activeRoadEvent = event,
+            isInCall = false,
+            inCallAlertMode = InCallAlertMode.MUTE_VISUAL
+        )
+        val output = AlertArbitrator.arbitrate(input)
+        assertEquals(AlertPriority.EMERGENCY_OVERSPEED, output.priority)
+        assertTrue("超速時必須強制清空佇列", output.isFlushQueue)
+        assertTrue("超速時必須發出緊急音", output.isUrgentTone)
+        assertTrue("語音文字應包含超速警示", output.speechText?.contains("已超速") == true)
+    }
+
+    @Test fun arbitratorNormalSpeedFusesCameraAndEvent() {
+        val cam = camera(limit = 100)
+        val event = closure("道路施工封閉")
+        val input = ArbitrationInput(
+            currentSpeedKmh = 90,
+            speedLimitKmh = 100,
+            distanceToCameraMeters = 300.0,
+            nearestCamera = cam,
+            activeRoadEvent = event,
+            isInCall = false,
+            inCallAlertMode = InCallAlertMode.MUTE_VISUAL
+        )
+        val output = AlertArbitrator.arbitrate(input)
+        assertEquals(AlertPriority.TECH_CAMERA, output.priority)
+        assertFalse(output.isFlushQueue)
+        assertTrue("應智慧融合道路封閉提示", output.speechText?.contains("道路封閉") == true)
+        assertTrue(output.speechText?.contains("測速照相") == true)
+    }
+
+    @Test fun arbitratorInCallMuteVisualMode() {
+        val cam = camera(limit = 100)
+        val input = ArbitrationInput(
+            currentSpeedKmh = 90,
+            speedLimitKmh = 100,
+            distanceToCameraMeters = 300.0,
+            nearestCamera = cam,
+            isInCall = true,
+            inCallAlertMode = InCallAlertMode.MUTE_VISUAL
+        )
+        val output = AlertArbitrator.arbitrate(input)
+        assertFalse("通話靜音模式下禁止語音播報", output.isVoiceAllowed)
+        assertTrue("通話靜音模式下必須啟用視覺閃爍", output.isVisualFlashRequired)
+        assertNull(output.speechText)
+    }
+    @Test fun freewayPoliceHotspotIdentificationAndCorridorLimits() {
+        val freewayHotspot = SpeedCamera(
+            id = "hp-1", city = "臺中市", region = "后里區",
+            address = "國道一號南下 158.6K 大安溪橋南端避車彎【經常出沒移動式測速】",
+            dept = "國道公路警察局", lat = 24.3312, lng = 120.7185, directText = "南下經常出沒取締",
+            speedLimit = 110, type = CameraType.HOTSPOT
+        )
+        assertTrue(CameraAlertPolicy.isFreeway(freewayHotspot))
+        assertTrue(CameraAlertPolicy.isFreewayPoliceHotspot(freewayHotspot))
+        assertEquals(35.0, CameraAlertPolicy.maxCrossTrackMeters(freewayHotspot, 800.0), 0.0)
+
+        val regularCamera = camera(type = CameraType.FIXED)
+        assertFalse(CameraAlertPolicy.isFreewayPoliceHotspot(regularCamera))
+        assertEquals(105.0, CameraAlertPolicy.maxCrossTrackMeters(regularCamera, 800.0), 0.0)
+    }
+
+    @Test fun arbitratorFreewayPoliceHotspotOverspeedAndNormal() {
+        val freewayHotspot = SpeedCamera(
+            id = "hp-1", city = "臺中市", region = "后里區",
+            address = "國道一號南下 158.6K 避車彎",
+            dept = "國道公路警察局", lat = 24.3312, lng = 120.7185, directText = "南下經常出沒取締",
+            speedLimit = 110, type = CameraType.HOTSPOT
+        )
+        // 超速 120 km/h (速限 110)
+        val inputOver = ArbitrationInput(
+            currentSpeedKmh = 120,
+            speedLimitKmh = 110,
+            distanceToCameraMeters = 400.0,
+            nearestCamera = freewayHotspot,
+            isInCall = false
+        )
+        val outOver = AlertArbitrator.arbitrate(inputOver)
+        assertEquals(AlertPriority.EMERGENCY_OVERSPEED, outOver.priority)
+        assertTrue(outOver.isUrgentTone)
+        assertTrue(outOver.isFlushQueue)
+        assertTrue(outOver.speechText?.contains("警車經常出沒點") == true)
+        assertTrue(outOver.speechText?.contains("已超速") == true)
+
+        // 未超速 100 km/h
+        val inputNormal = ArbitrationInput(
+            currentSpeedKmh = 100,
+            speedLimitKmh = 110,
+            distanceToCameraMeters = 800.0,
+            nearestCamera = freewayHotspot,
+            isInCall = false
+        )
+        val outNormal = AlertArbitrator.arbitrate(inputNormal)
+        assertEquals(AlertPriority.TECH_CAMERA, outNormal.priority)
+        assertFalse(outNormal.isUrgentTone)
+        assertFalse(outNormal.isFlushQueue)
+        assertTrue(outNormal.speechText?.contains("注意") == true)
+        assertTrue(outNormal.speechText?.contains("警車經常出沒點") == true)
     }
 }

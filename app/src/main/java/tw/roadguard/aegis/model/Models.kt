@@ -68,92 +68,15 @@ data class ScoredRoadEvent(
     val relativeAngleDeg: Double
 )
 
-data class NavStep(
-    val stepIndex: Int,
-    val roadName: String,
-    val instruction: String,
-    val maneuverType: String,
-    val maneuverModifier: String,
-    val maneuverIcon: String,
-    val distanceMeters: Double,
-    val durationSec: Double,
-    val maneuverLat: Double,
-    val maneuverLng: Double,
-    val stepPoints: List<Pair<Double, Double>> = emptyList()
-)
-
-data class NavRoute(
-    val destinationName: String,
-    val originLat: Double,
-    val originLng: Double,
-    val destLat: Double,
-    val destLng: Double,
-    val totalDistanceMeters: Double,
-    val totalDurationSec: Double,
-    val steps: List<NavStep>,
-    val routePoints: List<Pair<Double, Double>>,
-    val closuresOnRoute: List<ScoredRoadEvent> = emptyList(),
-    val constructionsOnRoute: List<ScoredRoadEvent> = emptyList(),
-    val camerasOnRoute: List<ScoredCamera> = emptyList(),
-    val bypassWaypoint: Pair<Double, Double>? = null
-)
-
-data class NavState(
-    val isNavigating: Boolean = false,
-    val destinationName: String = "",
-    val currentStepIndex: Int = 0,
-    val currentStep: NavStep? = null,
-    val nextStep: NavStep? = null,
-    val distanceToTurnMeters: Double = 0.0,
-    val distanceToNextTurnMeters: Double = 0.0,
-    val remainingDistanceMeters: Double = 0.0,
-    val remainingDistMeters: Double = 0.0,
-    val remainingDurationSec: Double = 0.0,
-    val remainingTimeSec: Double = 0.0,
-    val isOffRoute: Boolean = false,
-    val currentRoadName: String = "",
-    val roadName: String = "",
-    val maneuverIcon: String = "⬆️",
-    val instruction: String = "",
-    val nextHint: String = "",
-    val etaFormatted: String = "--:--"
-)
-
-data class DestinationCandidate(
-    val name: String,
-    val address: String,
-    val lat: Double,
-    val lng: Double,
-    val category: String = "地點",
-    val distanceMeters: Double = 0.0
-)
-
-data class RouteScanResult(
-    val destinationName: String,
-    val originLat: Double,
-    val originLng: Double,
-    val destLat: Double,
-    val destLng: Double,
-    val distanceKm: Double,
-    val durationMin: Int,
-    val routePoints: List<Pair<Double, Double>>,
-    val closuresOnRoute: List<ScoredRoadEvent>,
-    val constructionsOnRoute: List<ScoredRoadEvent>,
-    val hazardsOnRoute: List<ScoredRoadEvent>,
-    val camerasOnRoute: List<ScoredCamera>,
-    val bypassWaypoint: Pair<Double, Double>?,
-    val navRoute: NavRoute? = null
-)
-
 data class HsuehshanAdvice(
     val direction: String = "S", // "S" (南下往宜蘭) or "N" (北上往台北)
     val directionLabel: String = "南下 (往宜蘭)",
     val towards: String = "往宜蘭",
     val distanceToEntranceMeters: Double = 0.0,
-    val recommendedLane: String = "outer", // "inner" or "outer"
-    val recommendedLaneName: String = "外側車道",
-    val recommendedLaneSide: String = "右線",
-    val reason: String = "外側車道較順暢",
+    val recommendedLane: String = "", // "inner" or "outer"
+    val recommendedLaneName: String = "",
+    val recommendedLaneSide: String = "",
+    val reason: String = "請依現場指示行駛",
     val diffKmh: Int = 0,
     val innerSpeedKmh: Int? = null,
     val outerSpeedKmh: Int? = null,
@@ -163,7 +86,9 @@ data class HsuehshanAdvice(
     val alertEvent: String? = null,
     val isApproachingEntrance: Boolean = false,
     val dataTime: String = "--:--"
-)
+) {
+    val hasLaneRecommendation: Boolean get() = recommendedLane == "inner" || recommendedLane == "outer"
+}
 
 data class RadarSnapshot(
     val lat: Double = 24.1605,
@@ -187,8 +112,10 @@ data class RadarSnapshot(
     val lastUpdatedTime: String = "--:--",
     val totalCamerasCount: Int = 0,
     val totalActiveEventsCount: Int = 0,
-    val navState: NavState? = null,
-    val tunnelLaneAdvice: HsuehshanAdvice? = null
+    val tunnelLaneAdvice: HsuehshanAdvice? = null,
+    val isDeadReckoning: Boolean = false,
+    val intervalProgressFraction: Float = 0f,
+    val intervalSpeedLimit: Int = 0
 )
 
 object GeoUtils {

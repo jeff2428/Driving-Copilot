@@ -99,27 +99,8 @@ object HsuehshanTunnelClient {
         }
 
         val root = cachedReport
-        if (root == null) {
-            // 尚未載入完成時的友善預設降級資料
-            return HsuehshanAdvice(
-                direction = dirKey,
-                directionLabel = dirLabel,
-                towards = towards,
-                distanceToEntranceMeters = distanceMeters,
-                recommendedLane = "outer",
-                recommendedLaneName = "外側車道",
-                recommendedLaneSide = "右線",
-                reason = "雪隧即時資料連線中，請依現場指示行駛",
-                diffKmh = 0,
-                innerSpeedKmh = null,
-                outerSpeedKmh = null,
-                innerTravelMin = null,
-                outerTravelMin = null,
-                tunnelTravelMin = 9.0,
-                alertEvent = null,
-                isApproachingEntrance = isApproaching,
-                dataTime = "--:--"
-            )
+        if (root == null || System.currentTimeMillis() - lastFetchTimestamp > CACHE_DURATION_MS) {
+            return fallbackAdvice(dirKey, dirLabel, towards, distanceMeters, isApproaching)
         }
 
         try {
@@ -128,7 +109,10 @@ object HsuehshanTunnelClient {
             val innerObj = dirObj.optJSONObject("inner")
             val outerObj = dirObj.optJSONObject("outer")
 
-            val recLane = recObj?.optString("lane", "outer") ?: "outer"
+            val recLane = recObj?.optString("lane")
+            if (recLane != "inner" && recLane != "outer") {
+                return fallbackAdvice(dirKey, dirLabel, towards, distanceMeters, isApproaching)
+            }
             val recName = if (recLane == "inner") "內側車道" else "外側車道"
             val recSide = if (recLane == "inner") "左線" else "右線"
             var reason = recObj?.optString("reason", "行車較順暢") ?: "行車較順暢"
@@ -141,11 +125,15 @@ object HsuehshanTunnelClient {
             val innerSpeed = if (innerObj != null && !innerObj.isNull("avgSpeed")) innerObj.optInt("avgSpeed") else null
             val outerSpeed = if (outerObj != null && !outerObj.isNull("avgSpeed")) outerObj.optInt("avgSpeed") else null
 
+            if (innerSpeed == null || outerSpeed == null) {
+                return fallbackAdvice(dirKey, dirLabel, towards, distanceMeters, isApproaching)
+            }
+
             val innerMin = if (innerObj != null && !innerObj.isNull("travelMin")) innerObj.optDouble("travelMin") else null
             val outerMin = if (outerObj != null && !outerObj.isNull("travelMin")) outerObj.optDouble("travelMin") else null
 
             val chosenMin = if (recLane == "inner") innerMin else outerMin
-            val travelMin = chosenMin ?: 8.5
+            val travelMin = chosenMin
 
             // 檢查隧道內是否有嚴重事故路況
             var alertEvent: String? = null
@@ -204,17 +192,6 @@ object HsuehshanTunnelClient {
             directionLabel = dirLabel,
             towards = towards,
             distanceToEntranceMeters = distanceMeters,
-            recommendedLane = "outer",
-            recommendedLaneName = "外側車道",
-            recommendedLaneSide = "右線",
-            reason = "雙白線禁止變換車道，請依現場車流選定車道",
-            diffKmh = 0,
-            innerSpeedKmh = null,
-            outerSpeedKmh = null,
-            innerTravelMin = null,
-            outerTravelMin = null,
-            tunnelTravelMin = 8.5,
-            alertEvent = null,
             isApproachingEntrance = isApproaching,
             dataTime = "--:--"
         )

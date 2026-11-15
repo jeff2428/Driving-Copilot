@@ -111,6 +111,25 @@ internal object CameraAlertPolicy {
         return passedOrthogonal || passedSide
     }
 
+    fun isFreewayPoliceHotspot(camera: SpeedCamera): Boolean {
+        val text = camera.address + " " + camera.directText
+        val hasHotspotKeyword = text.contains("經常出沒") || text.contains("雷射") ||
+                text.contains("移動") || text.contains("流動") || text.contains("避車彎") || text.contains("三腳架")
+        return (camera.type == CameraType.HOTSPOT && (isFreeway(camera) || hasHotspotKeyword)) ||
+                (isFreeway(camera) && hasHotspotKeyword)
+    }
+
+    fun maxCrossTrackMeters(camera: SpeedCamera, distanceMeters: Double): Double {
+        if (isFreewayPoliceHotspot(camera)) {
+            return 35.0
+        }
+        return when {
+            distanceMeters <= 350.0 -> 48.0
+            distanceMeters <= 750.0 -> 75.0
+            else -> 105.0
+        }
+    }
+
     fun distanceLabel(distanceMeters: Double): String = if (distanceMeters >= 1000.0) {
         String.format(Locale.TAIWAN, "前方 %.1f 公里", distanceMeters / 1000.0)
     } else {
@@ -119,6 +138,15 @@ internal object CameraAlertPolicy {
 
     fun message(camera: SpeedCamera, stage: Int, distanceMeters: Double, isOver: Boolean): String {
         val meters = ((distanceMeters / 50).toInt() * 50).coerceAtLeast(50)
+        val isFreewayHotspot = isFreewayPoliceHotspot(camera)
+        if (isFreewayHotspot) {
+            val speedStr = if (camera.speedLimit > 0) "，速限 ${camera.speedLimit}" else ""
+            return if (isOver) {
+                "警告！您已超速，前方 $meters 公尺有警車經常出沒點$speedStr，請立即減速！"
+            } else {
+                "注意，前方 $meters 公尺有警車經常出沒點$speedStr"
+            }
+        }
         val kind = when (camera.type) {
             CameraType.HOTSPOT -> "經常出沒移動式測速"
             CameraType.TECH -> {

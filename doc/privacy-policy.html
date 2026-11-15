@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>神盾路況行車助手 - 隱私權政策 (Privacy Policy)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.7;
+            color: #1e293b;
+            background-color: #f8fafc;
+            margin: 0;
+            padding: 24px 16px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #ffffff;
+            padding: 36px 32px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+        }
+        h1 {
+            color: #0f172a;
+            font-size: 26px;
+            border-bottom: 2px solid #3b82f6;
+            padding-bottom: 12px;
+            margin-top: 0;
+        }
+        h2 {
+            color: #1e40af;
+            font-size: 20px;
+            margin-top: 28px;
+            margin-bottom: 12px;
+        }
+        p, li {
+            font-size: 15px;
+        }
+        .highlight-box {
+            background-color: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 16px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .update-date {
+            color: #64748b;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+        footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+            color: #64748b;
+            font-size: 13px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>神盾路況行車助手 隱私權保護政策</h1>
+    <div class="update-date">最後更新日期：2026 年 10 月 27 日 | 適用版本：Android & iOS 雙平台</div>
+
+    <p>歡迎使用「神盾路況行車助手」（以下簡稱「本軟體」或「我們」）。我們極為重視您的隱私權與個人資料保護，並嚴格遵循中華民國《個人資料保護法》、Google Play 開發人員政策以及 Apple App Store 審查指南。本政策旨在向您清楚說明本軟體如何收集、處理、利用您的裝置資訊與定位數據。</p>
+
+    <div class="highlight-box">
+        <strong>核心隱私承諾：</strong>
+        <ul>
+            <li><strong>零軌跡上傳</strong>：所有車速計算、測速照相與科技執法比對，100% 於您的手機本機即時運算，絕不回傳您的行車軌跡至遠端伺服器。</li>
+            <li><strong>不販售數據</strong>：我們絕不向任何第三方廣告商、數據仲介商出售或提供您的個人識別資料或精確定位記錄。</li>
+            <li><strong>關閉即停止</strong>：一旦您關閉後台服務或結束 App，系統立即釋放定位權限與記憶體，停止所有背景位置存取。</li>
+        </ul>
+    </div>
+
+    <h2>一、 核心權限使用說明與顯著揭露宣告 (Prominent Disclosures)</h2>
+    <p>為在駕駛過程中為您提供即時、不間斷且安全的測速照相與道路施工警示，本軟體在取得您的明確同意後，將請求以下系統權限：</p>
+    
+    <h3>1. 背景位置資訊 (ACCESS_BACKGROUND_LOCATION)</h3>
+    <ul>
+        <li><strong>用途宣告</strong>：當您在開車時切換至 Google Maps / Apple 地圖導航、通話中、或關閉螢幕鎖定時，本軟體必須於背景持續接收 GPS 座標，以便在接近測速照相桿、區間測速起終點或道路施工封閉時，能透過語音與懸浮窗提前警示。</li>
+        <li><strong>限制</strong>：背景定位資料僅於本機記憶體進行毫秒級距離比對，計算完畢即拋棄，絕不上傳雲端伺服器。</li>
+    </ul>
+
+    <h3>2. 前台服務類型 (FOREGROUND_SERVICE_LOCATION)</h3>
+    <ul>
+        <li><strong>用途宣告</strong>：Android 系統規範後台常駐服務必須顯示前景常駐通知（常駐於通知中心），以確保駕駛人清楚知道行車助手正在守護您的車速，並防止系統在記憶體吃緊時意外關閉雷達監控。</li>
+    </ul>
+
+    <h3>3. 顯示在其他應用程式上層 (SYSTEM_ALERT_WINDOW)</h3>
+    <ul>
+        <li><strong>用途宣告</strong>：用於在 Google 地圖或其他 App 上方顯示「極簡懸浮時速膠囊」與「緊急超速動態警報」，確保您在不切換畫面、零遮擋導航路線的前提下掌握即時車速與相機速限。</li>
+    </ul>
+
+    <h2>二、 區間測速快照持久化說明 (Snapshot Persistence)</h2>
+    <p>當您行駛於區間測速路段時，為防止系統記憶體回收（Low Memory Killer）導致平均時速與通過秒數丟失，本軟體會將「當前區間相機編號、進入時間與行駛里程」儲存於您手機的本機安全儲存區（SharedPreferences）。</p>
+    <ul>
+        <li>該快照資料僅供手機重啟時無縫復原計速使用。</li>
+        <li>一旦您通過區間測速終點或超時（2 小時），本機快照立即自動銷毀。</li>
+    </ul>
+
+    <h2>三、 第三方服務與廣告 SDK 說明</h2>
+    <p>為支持免費版用路人持續享有全台每日圖資更新，本軟體採用 Google Mobile Ads (AdMob) 提供非個人化或個人化廣告服務：</p>
+    <ul>
+        <li>Google AdMob 可能會收集裝置識別碼（如 Android 廣告 ID / iOS IDFA）與粗略診斷數據以投放廣告。</li>
+        <li>您可以隨時在手機系統設定中重設廣告 ID 或限制廣告追蹤；或升級為 Pro 會員以享受 100% 無廣告純淨體驗。</li>
+    </ul>
+
+    <h2>四、 資料安全防護</h2>
+    <p>本軟體採業界標準之安全設計原則，所有雲端圖資同步皆經由 HTTPS / TLS 1.3 進行加密傳輸與 SHA-256 完整性校驗，杜絕中間人攻擊與假圖資注入。</p>
+
+    <h2>五、 使用者權利與資料刪除</h2>
+    <p>您對自身資料擁有完整控制權：</p>
+    <ul>
+        <li>您可隨時在系統設定中關閉「位置資訊」或「懸浮窗」權限。</li>
+        <li>解除安裝本軟體將自動清除您手機內存儲的所有本機快照與設定記錄。</li>
+    </ul>
+
+    <h2>六、 聯絡我們 (Contact Information)</h2>
+    <p>若您對本隱私權政策或個人資料處理有任何疑問、建議或申訴，請透過以下方式與開發團隊聯繫：</p>
+    <ul>
+        <li><strong>專案官方儲存庫</strong>：<a href="https://github.com/jeff2428/Driving-Copilot" target="_blank">GitHub: Driving-Copilot</a></li>
+        <li><strong>技術支援信箱</strong>：support@roadguard-aegis.tw</li>
+    </ul>
+
+    <footer>
+        &copy; 2026 神盾路況行車助手 (TW-RoadGuard-Aegis) 開發團隊. 版權所有.
+    </footer>
+</div>
+</body>
+</html>

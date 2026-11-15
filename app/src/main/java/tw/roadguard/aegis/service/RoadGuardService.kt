@@ -57,8 +57,6 @@ class RoadGuardService : Service(), LocationListener {
         private set
     lateinit var adManager: AdRevenueManager
         private set
-    lateinit var navEngine: NavigationEngine
-        private set
     val intervalTracker = IntervalSpeedTracker()
     private var currentZoneStatus: IntervalSpeedTracker.ZoneStatus? = null
 
@@ -76,6 +74,7 @@ class RoadGuardService : Service(), LocationListener {
     private var floatRoadAlertTv: TextView? = null
     private var floatContainerBg: GradientDrawable? = null
     private var floatToggleHintTv: TextView? = null
+    private var floatMuteBtnTv: TextView? = null
     private var actionsBarView: View? = null
     private var overlayAnimator: ValueAnimator? = null
 
@@ -226,6 +225,31 @@ class RoadGuardService : Service(), LocationListener {
     private var simScenarioIndex: Int = 0
     private var simStep: Int = 0
     private var simRouteName: String = ""
+    private data class DrivingPosition(val lat: Double, val lng: Double, val speed: Int, val bearing: Float, val hasBearing: Boolean)
+    private var positionBeforeDemo: DrivingPosition? = null
+    private var drivingBeforeDemo = false
+
+    private val intervalTick = object : Runnable {
+        override fun run() {
+            val zone = intervalTracker.tickDeadReckoning()
+            currentZoneStatus = zone
+            if (zone.isDeadReckoning || zone.state == IntervalSpeedTracker.State.IDLE) {
+                if (zone.state == IntervalSpeedTracker.State.IDLE) intervalTracker.clearSnapshot(this@RoadGuardService)
+                val progress = if (zone.zoneLengthMeters > 0.0) {
+                    (zone.distanceTraveledMeters / zone.zoneLengthMeters).toFloat().coerceIn(0f, 1f)
+                } else 0f
+                publishSnapshot(latestSnapshot.copy(
+                    inIntervalZone = intervalTracker.isZoneActive(),
+                    intervalAvgSpeedKmh = zone.averageSpeedKmh,
+                    intervalRemainingSec = zone.remainingSeconds,
+                    isDeadReckoning = zone.isDeadReckoning,
+                    intervalProgressFraction = progress,
+                    intervalSpeedLimit = zone.camera?.speedLimit ?: 0
+                ))
+            }
+            if (intervalTracker.isZoneActive()) mainHandler.postDelayed(this, 1000L)
+        }
+    }
 
     @Volatile
     var latestSnapshot: RadarSnapshot = RadarSnapshot()
@@ -254,15 +278,16 @@ class RoadGuardService : Service(), LocationListener {
     override fun onCreate() {
         super.onCreate()
         repository = TaiwanOpenDataRepository(this)
-        voiceEngine = VoiceAlertEngine(this)
-        navEngine = NavigationEngine(repository, voiceEngine).apply {
-            onNavStateListener = { recomputeRadarState() }
+        voiceEngine = VoiceAlertEngine(this).apply {
+            onVisualAlertCallback = { isUrgent ->
+                floatingMainPill?.triggerVisualAlertFlash(isUrgent)
+            }
         }
         adManager = AdRevenueManager(this)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-        startForegroundNotification()
+        if (!startForegroundNotification()) return
 
         Thread {
             repository.initializeFromLocalAssets()
@@ -274,13 +299,17 @@ class RoadGuardService : Service(), LocationListener {
             }
         }.start()
 
+        // 嘗試從本機快照復原區間測速狀態 (Process Death Recovery)
+        if (intervalTracker.restoreFromSnapshot(this)) {
+            mainHandler.post(intervalTick)
+            recomputeRadarState()
+        }
         startGpsTracking()
         mainHandler.postDelayed(periodicSyncRunnable, 60_000L)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForegroundNotification()
-        return START_STICKY
+        return if (startForegroundNotification()) START_STICKY else START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -294,7 +323,7 @@ class RoadGuardService : Service(), LocationListener {
         listeners.remove(listener)
     }
 
-    private fun startForegroundNotification() {
+    private fun startForegroundNotification(): Boolean {
         val channelId = "tw_roadguard_aegis_channel"
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -328,11 +357,20 @@ class RoadGuardService : Service(), LocationListener {
             .setOngoing(true)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(1001, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        } else {
-            startForeground(1001, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1001, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(1001, notification)
+            }
+            return true
+        } catch (e: SecurityException) {
+            android.util.Log.w("RoadGuardService", "定位權限不足", e)
+        } catch (e: IllegalStateException) {
+            android.util.Log.w("RoadGuardService", "系統目前禁止啟動前景服務", e)
         }
+        stopSelf()
+        return false
     }
 
     @SuppressLint("MissingPermission")
@@ -385,8 +423,7 @@ class RoadGuardService : Service(), LocationListener {
         }
         // 低速或停等紅燈時保留最後有效車頭方向，避免方向歸零或亂跳抓到後方測速桿
 
-        navEngine.updateLocation(currentLat, currentLng, currentSpeedKmh.toDouble(), currentBearingDeg.toDouble())
-        recomputeRadarState()
+        recomputeRadarState(newLocation = true)
     }
 
     override fun onProviderEnabled(provider: String) {}
@@ -398,8 +435,14 @@ class RoadGuardService : Service(), LocationListener {
      * 啟動實境模擬試駕：自動挑選或建立真實測速桿 + 道路施工/封閉測試路線
      */
     fun startDemoSimulation(scenarioIdx: Int = 0) {
+        if (!isSimulating) {
+            positionBeforeDemo = DrivingPosition(currentLat, currentLng, currentSpeedKmh, currentBearingDeg, hasValidBearing)
+            drivingBeforeDemo = isDrivingActive
+        }
+        mainHandler.removeCallbacks(intervalTick)
+        intervalTracker.reset()
         isDrivingActive = true
-        simScenarioIndex = scenarioIdx % 6
+        simScenarioIndex = scenarioIdx % 7
         simStep = 0
         isSimulating = true
         hasValidBearing = true
@@ -480,7 +523,7 @@ class RoadGuardService : Service(), LocationListener {
                     evDesc = "雪山隧道內雙白線禁止變換車道，請保持安全車距"
                 )
             }
-            else -> {
+            5 -> {
                 simRouteName = "模擬路線 6：國道5號北上 28.8K (進雪隧前車道建議 ➔ 進洞後自動停止並切換雪隧科技執法)"
                 currentLat = 24.8458
                 currentLng = 121.8015
@@ -494,6 +537,20 @@ class RoadGuardService : Service(), LocationListener {
                     evDesc = "雪山隧道內雙白線禁止變換車道，請保持安全車距"
                 )
             }
+            else -> {
+                simRouteName = "模擬路線 7：國道一號南下 158.6K (后里避車彎警車與雷射槍出沒 110)"
+                currentLat = 24.3400
+                currentLng = 120.7185
+                currentBearingDeg = 180f // 往南行駛
+                currentSpeedKmh = 118   // 超速以展示紅藍警燈警戒與緊急播報
+                ensureDemoTargetsExist(
+                    camLat = 24.3312, camLng = 120.7185, limit = 110, camType = CameraType.HOTSPOT,
+                    camAddr = "臺中市后里區國道一號南下 158.6K 大安溪橋南端避車彎【經常出沒移動式測速】",
+                    evLat = 24.3250, evLng = 120.7185, isClosure = false,
+                    evRoad = "國道一號南下后里路段",
+                    evDesc = "前方常有流動警車雷射槍取締，請減速慢行"
+                )
+            }
         }
 
         voiceEngine.speakNow("開始實境模擬試駕：$simRouteName", urgentTone = false)
@@ -502,10 +559,30 @@ class RoadGuardService : Service(), LocationListener {
     }
 
     fun stopDemoSimulation() {
+        if (!isSimulating) return
         isSimulating = false
+        isDrivingActive = drivingBeforeDemo
         simRouteName = ""
-        currentSpeedKmh = 0
         mainHandler.removeCallbacks(simulationTickRunnable)
+        repository.editDemoTargets { data ->
+            data.cameras.removeAll { it.id.startsWith("SIM-") }
+            data.roadEvents.removeAll { it.uid.startsWith("SIM-") }
+        }
+        positionBeforeDemo?.let {
+            currentLat = it.lat
+            currentLng = it.lng
+            currentSpeedKmh = it.speed
+            currentBearingDeg = it.bearing
+            hasValidBearing = it.hasBearing
+        }
+        positionBeforeDemo = null
+        voiceEngine.resetMemory()
+        passedCameraCooldownMap.clear()
+        approachingCameraId = null
+        approachingCameraMinDist = Double.MAX_VALUE
+        completedTunnelApproachDir = null
+        intervalTracker.reset()
+        if (intervalTracker.restoreFromSnapshot(this)) mainHandler.post(intervalTick)
         recomputeRadarState()
     }
 
@@ -513,52 +590,54 @@ class RoadGuardService : Service(), LocationListener {
         camLat: Double, camLng: Double, limit: Int, camType: CameraType, camAddr: String,
         evLat: Double, evLng: Double, isClosure: Boolean, evRoad: String, evDesc: String
     ) {
-        repository.cameras.removeAll { it.id.startsWith("SIM-") }
-        repository.roadEvents.removeAll { it.uid.startsWith("SIM-") }
+        repository.editDemoTargets { data ->
+            data.cameras.removeAll { it.id.startsWith("SIM-") }
+            data.roadEvents.removeAll { it.uid.startsWith("SIM-") }
 
-        val dirStr = when {
-            currentBearingDeg in 300f..360f || currentBearingDeg in 0f..60f -> "往北"
-            currentBearingDeg in 120f..240f -> "往南"
-            else -> "雙向"
+            val dirStr = when {
+                currentBearingDeg in 300f..360f || currentBearingDeg in 0f..60f -> "往北"
+                currentBearingDeg in 120f..240f -> "往南"
+                else -> "雙向"
+            }
+
+            data.cameras.add(
+                0,
+                SpeedCamera(
+                    id = "SIM-CAM-$simScenarioIndex",
+                    city = "實境試駕",
+                    region = "測試路段",
+                    address = camAddr,
+                    dept = "警政署測速資料",
+                    lat = camLat,
+                    lng = camLng,
+                    directText = dirStr,
+                    speedLimit = limit,
+                    type = camType
+                )
+            )
+
+            val sev = if (isClosure) EventSeverity.CLOSURE else EventSeverity.CONSTRUCTION
+            data.roadEvents.add(
+                0,
+                RoadEvent(
+                    uid = "SIM-EV-$simScenarioIndex",
+                    roadName = evRoad,
+                    areaName = evRoad,
+                    direction = dirStr,
+                    lat = evLat,
+                    lng = evLng,
+                    rawComment = evDesc,
+                    voiceSummary = "$evRoad，${sev.label}：$evDesc",
+                    severity = sev,
+                    category = if (limit >= 80) RoadCategory.FREEWAY else RoadCategory.LOCAL,
+                    isCleared = false,
+                    isActiveNow = true,
+                    scheduleNote = "目前施工管制中",
+                    happenTime = "剛剛通報",
+                    sourceDetail = "警廣/養工處即時通報"
+                )
+            )
         }
-
-        repository.cameras.add(
-            0,
-            SpeedCamera(
-                id = "SIM-CAM-$simScenarioIndex",
-                city = "實境試駕",
-                region = "測試路段",
-                address = camAddr,
-                dept = "警政署測速資料",
-                lat = camLat,
-                lng = camLng,
-                directText = dirStr,
-                speedLimit = limit,
-                type = camType
-            )
-        )
-
-        val sev = if (isClosure) EventSeverity.CLOSURE else EventSeverity.CONSTRUCTION
-        repository.roadEvents.add(
-            0,
-            RoadEvent(
-                uid = "SIM-EV-$simScenarioIndex",
-                roadName = evRoad,
-                areaName = evRoad,
-                direction = dirStr,
-                lat = evLat,
-                lng = evLng,
-                rawComment = evDesc,
-                voiceSummary = "$evRoad，${sev.label}：$evDesc",
-                severity = sev,
-                category = if (limit >= 80) RoadCategory.FREEWAY else RoadCategory.LOCAL,
-                isCleared = false,
-                isActiveNow = true,
-                scheduleNote = "目前施工管制中",
-                happenTime = "剛剛通報",
-                sourceDetail = "警廣/養工處即時通報"
-            )
-        )
     }
 
     private fun advanceSimulationStep() {
@@ -569,42 +648,25 @@ class RoadGuardService : Service(), LocationListener {
         currentLat += cos(rad) * deltaDeg
         currentLng += sin(rad) * deltaDeg
 
-        navEngine.updateLocation(currentLat, currentLng, currentSpeedKmh.toDouble(), currentBearingDeg.toDouble())
 
         // 模擬接近測速桿後自動微調車速
         if (simStep in 18..28) {
             currentSpeedKmh = (currentSpeedKmh - 2).coerceAtLeast(36)
         } else if (simStep > 45) {
             simStep = 0
-            startDemoSimulation((simScenarioIndex + 1) % 6)
+            startDemoSimulation((simScenarioIndex + 1) % 7)
             return
         }
-        recomputeRadarState()
-    }
-
-    private fun minDistanceToPolyline(lat: Double, lng: Double, points: List<Pair<Double, Double>>): Double {
-        if (points.size < 2) return 0.0
-        var minD = Double.MAX_VALUE
-        for (i in 0 until points.size - 1) {
-            val a = points[i]
-            val b = points[i + 1]
-            val d = GeoUtils.pointToSegmentMeters(lat, lng, a.first, a.second, b.first, b.second)
-            if (d < minD) minD = d
-        }
-        return minD
+        recomputeRadarState(newLocation = true)
     }
 
     /**
      * 核心雙雷達運算：找出車頭前方最近的「測速照相」與「施工/封閉事件」並驅動語音與懸浮窗
      */
-    fun recomputeRadarState() {
+    fun recomputeRadarState(newLocation: Boolean = false) {
+        val data = repository.roadData
         val now = System.currentTimeMillis()
-        val canAlert = isDrivingActive || isSimulating || navEngine.isNavigating
-        val activeNavRoutePoints = if (navEngine.isNavigating) navEngine.activeRoute?.routePoints else null
-        val validNavRoutePoints = activeNavRoutePoints?.takeIf { it.size >= 2 }
-        val vehicleDistanceToRoute = validNavRoutePoints?.let {
-            minDistanceToPolyline(currentLat, currentLng, it)
-        }
+        val canAlert = isDrivingActive || isSimulating
         val insideHsuehshan = GeoUtils.isInsideHsuehshanTunnel(currentLat, currentLng)
 
         // 清理過期的已通過測速桿冷卻紀錄 (65 秒後釋放)
@@ -612,7 +674,7 @@ class RoadGuardService : Service(), LocationListener {
 
         // 1. 檢查上一支正在接近中的測速桿是否已經「通過車身」(使用向量通過門閥判定)
         if (approachingCameraId != null) {
-            val trackedCam = repository.cameras.firstOrNull { it.id == approachingCameraId }
+            val trackedCam = data.cameras.firstOrNull { it.id == approachingCameraId }
             if (trackedCam != null) {
                 val curDist = GeoUtils.distanceMeters(currentLat, currentLng, trackedCam.lat, trackedCam.lng)
                 val curBearing = GeoUtils.bearingDeg(currentLat, currentLng, trackedCam.lat, trackedCam.lng)
@@ -641,11 +703,11 @@ class RoadGuardService : Service(), LocationListener {
         }
 
         // 2. 篩選車頭正前方走廊內的候選測速照相與地圖全域可見標示
-        val useDirectionalFilter = forwardConeOnly && (hasValidBearing || currentSpeedKmh > 3 || isSimulating || navEngine.isNavigating)
+        val useDirectionalFilter = forwardConeOnly && (hasValidBearing || currentSpeedKmh > 3 || isSimulating)
         val candidateCameras = ArrayList<ScoredCamera>()
         val mapVisibleCams = ArrayList<Pair<SpeedCamera, Double>>()
 
-        for (cam in repository.cameras) {
+        for (cam in data.cameras) {
             val dLat = kotlin.math.abs(cam.lat - currentLat)
             val dLng = kotlin.math.abs(cam.lng - currentLng)
 
@@ -680,15 +742,8 @@ class RoadGuardService : Service(), LocationListener {
                     continue
                 }
             }
-            val cameraDistanceToRoute = validNavRoutePoints?.let {
-                minDistanceToPolyline(cam.lat, cam.lng, it)
-            }
-            val onNavigationCorridor = CameraAlertPolicy.isOnNavigationCorridor(
-                cameraDistanceToRoute, vehicleDistanceToRoute
-            )
             if (CameraAlertPolicy.excludeAtLowSpeed(cam, currentSpeedKmh, isSimulating,
-                    insideHsuehshan, approachingCameraId == cam.id, onNavigationCorridor)) {
-                // 導航走廊確認的國道測速點，塞車低速時仍保持提醒。
+                    insideHsuehshan, approachingCameraId == cam.id, false)) {
                 continue
             }
 
@@ -703,18 +758,9 @@ class RoadGuardService : Service(), LocationListener {
                     dist <= 750.0 -> 40.0
                     else -> 45.0
                 }
-                val maxCrossTrack = when {
-                    dist <= 350.0 -> 48.0
-                    dist <= 750.0 -> 75.0
-                    else -> 105.0
-                }
+                val maxCrossTrack = CameraAlertPolicy.maxCrossTrackMeters(cam, dist)
                 if (relAngle > maxConeAngle || crossTrack > maxCrossTrack) {
                     continue
-                }
-                // (C) 若正在進行軟體內建導航，確保測速桿位於導航路線走廊 (45m) 內
-                if (!activeNavRoutePoints.isNullOrEmpty() && dist <= 1500.0) {
-                    val distToRoute = cameraDistanceToRoute ?: minDistanceToPolyline(cam.lat, cam.lng, activeNavRoutePoints)
-                    if (distToRoute > 45.0) continue
                 }
             }
 
@@ -753,22 +799,33 @@ class RoadGuardService : Service(), LocationListener {
                 approachingCameraMinDist = nearestCam.distanceMeters
             }
             voiceEngine.checkAndAnnounceCamera(nearestCam.camera, nearestCam.distanceMeters, currentSpeedKmh)
+            val isCamOver = currentSpeedKmh > nearestCam.camera.speedLimit
+            voiceEngine.checkAndPlayProximityBeep(nearestCam.distanceMeters, isCamOver, now)
         }
 
         // 區間測速生命週期引擎更新
         val intervalCandidate = candidateCameras.firstOrNull { it.camera.type == CameraType.INTERVAL }
-        val zoneStatus = intervalTracker.onLocationUpdate(
+        val zoneStatus = if (newLocation) intervalTracker.onLocationUpdate(
             lat = currentLat,
             lng = currentLng,
             speedKmh = currentSpeedKmh,
             nearestIntervalCamera = intervalCandidate?.camera,
             distanceToCameraMeters = intervalCandidate?.distanceMeters ?: Double.MAX_VALUE,
             now = now
-        )
+        ) else intervalTracker.getStatus(now)
         currentZoneStatus = zoneStatus
 
+        // 區間測速快照持久化 (Snapshot Persistence)
+        if (newLocation && !isSimulating && intervalTracker.isZoneActive()) {
+            intervalTracker.saveSnapshotToPrefs(this)
+            mainHandler.removeCallbacks(intervalTick)
+            mainHandler.postDelayed(intervalTick, 3000L)
+        } else if (!isSimulating && zoneStatus.state == IntervalSpeedTracker.State.COMPLETED) {
+            intervalTracker.clearSnapshot(this)
+        }
+
         if (canAlert) {
-            if (zoneStatus.state == IntervalSpeedTracker.State.APPROACHING_START && !intervalTracker.hasAnnouncedStart) {
+            if ((zoneStatus.state == IntervalSpeedTracker.State.APPROACHING_START || zoneStatus.state == IntervalSpeedTracker.State.IN_ZONE) && !intervalTracker.hasAnnouncedStart) {
                 intervalTracker.markStartAnnounced()
                 zoneStatus.camera?.let { voiceEngine.announceIntervalStart(it) }
             } else if (zoneStatus.state == IntervalSpeedTracker.State.COMPLETED && !intervalTracker.hasAnnouncedEnd) {
@@ -793,7 +850,7 @@ class RoadGuardService : Service(), LocationListener {
         val candidateEvents = ArrayList<ScoredRoadEvent>()
         val mapVisibleEvs = ArrayList<Pair<RoadEvent, Double>>()
         var activeTotal = 0
-        for (ev in repository.roadEvents) {
+        for (ev in data.roadEvents) {
             if (ev.isCleared) continue
             activeTotal++
 
@@ -818,8 +875,7 @@ class RoadGuardService : Service(), LocationListener {
             val isAheadInCorridor = if (useDirectionalFilter) {
                 relAngle <= 48.0 &&
                         crossTrack <= 95.0 &&
-                        GeoUtils.isDirectionCompatible(currentBearingDeg, ev.direction) &&
-                        (activeNavRoutePoints.isNullOrEmpty() || minDistanceToPolyline(ev.lat, ev.lng, activeNavRoutePoints) <= 75.0)
+                        GeoUtils.isDirectionCompatible(currentBearingDeg, ev.direction)
             } else {
                 relAngle <= 65.0
             }
@@ -846,11 +902,8 @@ class RoadGuardService : Service(), LocationListener {
 
         val alertEvent = candidateEvents.firstOrNull { se ->
             val crossTrack = GeoUtils.crossTrackDistanceMeters(se.distanceMeters, se.relativeAngleDeg)
-            val inRoute = activeNavRoutePoints.isNullOrEmpty() ||
-                    minDistanceToPolyline(se.event.lat, se.event.lng, activeNavRoutePoints) <= 75.0
             se.distanceMeters <= dynamicEventRadius &&
                     se.event.isActiveNow &&
-                    inRoute &&
                     (!useDirectionalFilter || (se.relativeAngleDeg <= 48.0 && crossTrack <= 95.0 && GeoUtils.isDirectionCompatible(currentBearingDeg, se.event.direction)))
         }
         if (canAlert && alertEvent != null) {
@@ -866,6 +919,25 @@ class RoadGuardService : Service(), LocationListener {
 
         val isOverspeed = nearestCam != null &&
                 currentSpeedKmh > (nearestCam.camera.speedLimit + voiceEngine.overspeedToleranceKmh)
+
+        if (canAlert && (nearestCam != null || alertEvent != null || zoneStatus.state == IntervalSpeedTracker.State.COMPLETED)) {
+            val arbOut = AlertArbitrator.arbitrate(
+                ArbitrationInput(
+                    currentSpeedKmh = currentSpeedKmh,
+                    speedLimitKmh = nearestCam?.camera?.speedLimit ?: zoneStatus.camera?.speedLimit ?: 0,
+                    distanceToCameraMeters = nearestCam?.distanceMeters,
+                    nearestCamera = nearestCam?.camera,
+                    activeRoadEvent = alertEvent?.event,
+                    isIntervalEnd = zoneStatus.state == IntervalSpeedTracker.State.COMPLETED,
+                    intervalAvgSpeedKmh = zoneStatus.averageSpeedKmh,
+                    isInCall = voiceEngine.isInCall(),
+                    inCallAlertMode = voiceEngine.inCallAlertMode
+                )
+            )
+            if (arbOut.isVisualFlashRequired && nearestCam?.camera?.type != CameraType.HOTSPOT) {
+                floatingMainPill?.triggerVisualAlertFlash(arbOut.isUrgentTone)
+            }
+        }
 
         // 4. 國道5號 雪山隧道進洞前車道即時建議 (南下坪林端 15.2K / 北上頭城端 28.1K)
         // 核心原則：只在「進入洞口前」提醒；一旦進洞前提醒完並進入隧道 (或洞口已在車身後方)，立即停止提醒，完全交由隧道內測速雷達接手！
@@ -923,6 +995,10 @@ class RoadGuardService : Service(), LocationListener {
             voiceEngine.checkAndAnnounceHsuehshanTunnel(tunnelAdvice)
         }
 
+        val intervalProgress = if (inInterval && zoneStatus.zoneLengthMeters > 0.0) {
+            (zoneStatus.distanceTraveledMeters / zoneStatus.zoneLengthMeters).toFloat().coerceIn(0f, 1f)
+        } else 0f
+
         val snapshot = RadarSnapshot(
             lat = currentLat,
             lng = currentLng,
@@ -943,11 +1019,17 @@ class RoadGuardService : Service(), LocationListener {
             mapVisibleCameras = mapVisibleCamerasList,
             mapVisibleEvents = mapVisibleEventsList,
             lastUpdatedTime = repository.lastSyncTimeStr,
-            totalCamerasCount = repository.cameras.size,
+            totalCamerasCount = data.cameras.size,
             totalActiveEventsCount = activeTotal,
-            navState = navEngine.currentNavState,
-            tunnelLaneAdvice = tunnelAdvice
+            tunnelLaneAdvice = tunnelAdvice,
+            isDeadReckoning = zoneStatus.isDeadReckoning,
+            intervalProgressFraction = intervalProgress,
+            intervalSpeedLimit = zoneStatus.camera?.speedLimit ?: 0
         )
+        publishSnapshot(snapshot)
+    }
+
+    private fun publishSnapshot(snapshot: RadarSnapshot) {
         latestSnapshot = snapshot
         updateFloatingOverlayUi(snapshot)
         for (l in listeners) {
@@ -980,8 +1062,10 @@ class RoadGuardService : Service(), LocationListener {
         }
 
         val mainPill = FloatingOverlayView(this).apply {
-            floatContainerBg = GradientDrawable().apply {
-                setColor(Color.parseColor("#EA0B132B"))
+            floatContainerBg = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.parseColor("#F20B132B"), Color.parseColor("#EB1E293B"))
+            ).apply {
                 cornerRadius = dp(22).toFloat()
                 setStroke(dp(2), Color.parseColor("#38BDF8"))
             }
@@ -999,7 +1083,7 @@ class RoadGuardService : Service(), LocationListener {
 
         // -------------------------------------------------------------
         // 平時隱藏的功能按鈕列：點擊懸浮視窗後展開
-        // 包含：【📱 返回軟體】與【🛑 關閉程式】
+        // 包含：【🔊 一鍵靜音】、【📱 返回軟體】與【🛑 關閉程式】
         // -------------------------------------------------------------
         val actionsBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1015,6 +1099,36 @@ class RoadGuardService : Service(), LocationListener {
         }
         actionsBarView = actionsBar
 
+        // 8 秒無動作自動收合按鈕列，避免駕駛時持續遮擋導航地圖
+        val autoCollapseRunnable = Runnable {
+            if (actionsBar.visibility == View.VISIBLE) {
+                actionsBar.visibility = View.GONE
+                toggleHintTv.text = " ▾ "
+            }
+        }
+
+        val btnMute = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            styleFloatingMuteButton(this)
+            setOnClickListener {
+                voiceEngine.isVoiceEnabled = !voiceEngine.isVoiceEnabled
+                styleFloatingMuteButton(this)
+                Toast.makeText(
+                    this@RoadGuardService,
+                    if (voiceEngine.isVoiceEnabled) "🔊 語音警報已開啟" else "🔇 已靜音（保留懸浮視覺警示）",
+                    Toast.LENGTH_SHORT
+                ).show()
+                mainHandler.removeCallbacks(autoCollapseRunnable)
+                mainHandler.postDelayed(autoCollapseRunnable, 8000L)
+                recomputeRadarState()
+            }
+        }
+        floatMuteBtnTv = btnMute
+        actionsBar.addView(btnMute)
+
         val btnReturn = TextView(this).apply {
             text = "📱 返回軟體"
             setTextColor(Color.WHITE)
@@ -1025,6 +1139,12 @@ class RoadGuardService : Service(), LocationListener {
                 setColor(Color.parseColor("#EA1D4ED8")) // 質感深藍
                 cornerRadius = dp(16).toFloat()
                 setStroke(dp(1), Color.parseColor("#60A5FA"))
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                leftMargin = dp(8)
             }
             setOnClickListener {
                 val openIntent = Intent(this@RoadGuardService, MainActivity::class.java).apply {
@@ -1088,14 +1208,6 @@ class RoadGuardService : Service(), LocationListener {
             gravity = Gravity.TOP or Gravity.START
             x = dp(16)
             y = dp(90)
-        }
-
-        // 8 秒無動作自動收合按鈕列，避免駕駛時持續遮擋導航地圖
-        val autoCollapseRunnable = Runnable {
-            if (actionsBar.visibility == View.VISIBLE) {
-                actionsBar.visibility = View.GONE
-                toggleHintTv.text = " ▾ "
-            }
         }
 
         // 支援手指自由拖曳懸浮視窗；支援螢幕邊界外收折貼邊與點擊展開
@@ -1231,6 +1343,23 @@ class RoadGuardService : Service(), LocationListener {
         }, 300L)
     }
 
+    private fun styleFloatingMuteButton(btn: TextView) {
+        val dp = { v: Int ->
+            TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP,
+                v.toFloat(),
+                resources.displayMetrics
+            ).toInt()
+        }
+        val on = voiceEngine.isVoiceEnabled
+        btn.text = if (on) "🔊 語音開" else "🔇 已靜音"
+        btn.background = GradientDrawable().apply {
+            setColor(Color.parseColor(if (on) "#EA0F766E" else "#EA7F1D1D"))
+            cornerRadius = dp(16).toFloat()
+            setStroke(dp(1), Color.parseColor(if (on) "#2DD4BF" else "#FCA5A5"))
+        }
+    }
+
     fun hideFloatingOverlay() {
         overlayAnimator?.cancel()
         overlayAnimator = null
@@ -1246,6 +1375,7 @@ class RoadGuardService : Service(), LocationListener {
         floatingParams = null
         actionsBarView = null
         floatToggleHintTv = null
+        floatMuteBtnTv = null
         floatSpeedLimitTv = null
         floatCurrentSpeedTv = null
         floatCameraTitleTv = null
@@ -1306,21 +1436,7 @@ class RoadGuardService : Service(), LocationListener {
     fun stopDrivingMode() {
         isDrivingActive = false
         completedTunnelApproachDir = null
-        if (navEngine.isNavigating) {
-            navEngine.stopNavigation()
-        }
         voiceEngine.speakNavigation("已切換為待命靜音模式")
-        recomputeRadarState()
-    }
-
-    fun startNavigation(route: tw.roadguard.aegis.model.NavRoute) {
-        isDrivingActive = true
-        navEngine.startNavigation(route)
-        recomputeRadarState()
-    }
-
-    fun stopNavigation(reachDestination: Boolean = false) {
-        navEngine.stopNavigation(reachDestination)
         recomputeRadarState()
     }
 
@@ -1329,6 +1445,7 @@ class RoadGuardService : Service(), LocationListener {
         mainHandler.post {
             val config = OverlayStateEvaluator.evaluate(snap, currentZoneStatus)
             floatingMainPill?.applyConfig(config)
+            floatMuteBtnTv?.let { styleFloatingMuteButton(it) }
 
             if (dockState != DockSide.NONE && !autoExpandedForAlert) {
                 floatToggleHintTv?.visibility = View.VISIBLE
@@ -1374,12 +1491,18 @@ class RoadGuardService : Service(), LocationListener {
                 TypedValue.COMPLEX_UNIT_DIP, 2.5f, resources.displayMetrics
             ).toInt()
             val ev = snap.nearestRoadEvent
-            if (snap.isOverspeed) {
+            if (config.isOverspeed) {
                 floatCurrentSpeedTv?.setTextColor(Color.parseColor("#FF2E4C"))
                 floatContainerBg?.setStroke(dp2, Color.parseColor("#FF2E4C"))
             } else if (ev?.event?.severity == EventSeverity.CLOSURE && ev.distanceMeters <= 1500) {
                 floatCurrentSpeedTv?.setTextColor(Color.parseColor("#00F5D4"))
                 floatContainerBg?.setStroke(dp2, Color.parseColor("#FF9F1C"))
+            } else if (config.isPoliceAlert) {
+                floatCurrentSpeedTv?.setTextColor(Color.parseColor("#00F5D4"))
+                floatContainerBg?.setStroke(dp2, Color.parseColor("#EA580C"))
+            } else if (config.isDeadReckoning) {
+                floatCurrentSpeedTv?.setTextColor(Color.parseColor("#00F5D4"))
+                floatContainerBg?.setStroke(dp2, Color.parseColor("#0EA5E9"))
             } else {
                 floatCurrentSpeedTv?.setTextColor(Color.parseColor("#00F5D4"))
                 floatContainerBg?.setStroke(dp2, Color.parseColor("#38BDF8"))

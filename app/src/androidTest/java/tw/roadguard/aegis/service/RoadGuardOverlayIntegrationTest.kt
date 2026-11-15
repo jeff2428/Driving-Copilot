@@ -60,7 +60,6 @@ class RoadGuardOverlayIntegrationTest {
             service.voiceEngine.isPassChimeEnabled = false
             service.voiceEngine.isHotspotAlertEnabled = true
             service.stopDemoSimulation()
-            service.stopNavigation()
             service.repository.cameras.clear()
             service.repository.roadEvents.clear()
             service.currentLat = 24.1605
@@ -75,7 +74,6 @@ class RoadGuardOverlayIntegrationTest {
     @After fun cleanup() {
         if (::service.isInitialized) onMain {
             service.hideFloatingOverlay()
-            service.stopNavigation()
             service.voiceEngine.isVoiceEnabled = originalVoice
             service.voiceEngine.isHotspotAlertEnabled = originalHotspot
             service.voiceEngine.isPassChimeEnabled = originalPassChime
@@ -86,13 +84,14 @@ class RoadGuardOverlayIntegrationTest {
         instrumentation.waitForIdleSync()
     }
 
-    @Test fun navigationKeepsFreewayCameraVisibleInTrafficAndClearsAfterPassing() {
+    @Test fun overlayShowsFreewayCameraAtDrivingSpeedAndClearsAfterPassing() {
         val cam = camera(CameraType.FIXED)
         onMain {
             service.repository.cameras.add(cam)
             service.recomputeRadarState()
             assertNull("No navigation: preserve low-speed exclusion", service.latestSnapshot.nearestCamera)
-            service.startNavigation(route(cam))
+            service.currentSpeedKmh = 90
+            service.recomputeRadarState()
             assertEquals(cam.id, service.latestSnapshot.nearestCamera?.camera?.id)
         }
         instrumentation.waitForIdleSync()
@@ -218,11 +217,6 @@ class RoadGuardOverlayIntegrationTest {
     private fun camera(type: CameraType) = SpeedCamera(
         "instrumentation-$type", "國道一號", "", "國道一號北向100公里", "",
         24.1605 + 850.0 / 111194.9266, 120.6311, "往北", 110, type
-    )
-
-    private fun route(cam: SpeedCamera) = NavRoute(
-        "測試目的地", 24.1605, 120.6311, cam.lat + 0.01, cam.lng, 2000.0, 120.0,
-        emptyList(), listOf(24.1505 to cam.lng, (cam.lat + 0.01) to cam.lng)
     )
 
     private fun overlay(): FloatingOverlayView {

@@ -165,4 +165,72 @@ class FloatingOverlayStateTest {
         val config = OverlayStateEvaluator.evaluate(snap, null)
         assertEquals(OverlayMode.COMPACT_SPEED, config.mode)
     }
+
+    @Test
+    fun proximityBeepStagesMapCorrectly() {
+        assertEquals(1000L, ProximityBeepStage.STAGE_FAR.intervalMs)
+        assertEquals(500L, ProximityBeepStage.STAGE_MID.intervalMs)
+        assertEquals(250L, ProximityBeepStage.STAGE_NEAR.intervalMs)
+        assertEquals(200L, ProximityBeepStage.STAGE_NEAR_OVERSPEED.intervalMs)
+        assertTrue(ProximityBeepStage.STAGE_NEAR_OVERSPEED.isDoubleTone)
+        assertFalse(ProximityBeepStage.STAGE_NEAR.isDoubleTone)
+    }
+
+    @Test
+    fun inCallAlertModesConfiguredCorrectly() {
+        val defaultMode = InCallAlertMode.MUTE_VISUAL
+        assertEquals("MUTE_VISUAL", defaultMode.name)
+        val duckingMode = InCallAlertMode.DUCKING
+        assertEquals("DUCKING", duckingMode.name)
+        val normalMode = InCallAlertMode.NORMAL
+        assertEquals("NORMAL", normalMode.name)
+    }
+
+    @Test
+    fun progressFractionAndDeadReckoningReflectAlertProximityAndState() {
+        val cruisingConfig = OverlayStateEvaluator.evaluate(
+            RadarSnapshot(speedKmh = 60, isOverspeed = false),
+            null
+        )
+        assertEquals(0f, cruisingConfig.progressFraction, 0.001f)
+        assertFalse(cruisingConfig.isDeadReckoning)
+
+        val cam = testCamera(CameraType.FIXED, 110)
+        val approachingConfig = OverlayStateEvaluator.evaluate(
+            RadarSnapshot(
+                speedKmh = 100,
+                nearestCamera = ScoredCamera(cam, 500.0, 0.0),
+                isOverspeed = false
+            ),
+            null
+        )
+        assertEquals(0.5f, approachingConfig.progressFraction, 0.02f)
+
+        val intervalCam = testCamera(CameraType.INTERVAL, 90)
+        val zoneDrStatus = IntervalSpeedTracker.ZoneStatus(
+            state = IntervalSpeedTracker.State.IN_ZONE,
+            camera = intervalCam,
+            averageSpeedKmh = 85,
+            distanceTraveledMeters = 2400.0,
+            elapsedSeconds = 100L,
+            remainingSeconds = 30,
+            isAverageOverspeed = false,
+            displayMessage = "[隧道推估] 區間均速 85 km/h",
+            isDeadReckoning = true,
+            zoneLengthMeters = 3200.0
+        )
+        val drConfig = OverlayStateEvaluator.evaluate(
+            RadarSnapshot(
+                speedKmh = 85,
+                inIntervalZone = true,
+                isDeadReckoning = true,
+                intervalProgressFraction = 0.75f,
+                intervalSpeedLimit = 90
+            ),
+            zoneDrStatus
+        )
+        assertEquals(OverlayMode.ALERT, drConfig.mode)
+        assertTrue(drConfig.isDeadReckoning)
+        assertEquals(0.75f, drConfig.progressFraction, 0.01f)
+    }
 }

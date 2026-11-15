@@ -6,6 +6,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -15,6 +16,19 @@ import tw.roadguard.aegis.model.RoadEvent
 import tw.roadguard.aegis.model.SpeedCamera
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+
+enum class ProximityBeepStage(
+    val maxDistanceMeters: Double,
+    val minDistanceMeters: Double,
+    val intervalMs: Long,
+    val isDoubleTone: Boolean
+) {
+    STAGE_FAR(150.0, 100.0, 1000L, false),      // 150m ~ 100m: 1.0秒單音
+    STAGE_MID(100.0, 50.0, 500L, false),        // 100m ~ 50m: 0.5秒單音
+    STAGE_NEAR(50.0, 0.0, 250L, false),         // 50m ~ 通過點: 0.25秒急促單音
+    STAGE_NEAR_OVERSPEED(50.0, 0.0, 200L, true),// 50m ~ 通過點且超速: 0.20秒急促雙音
+    NONE(Double.MAX_VALUE, 150.0, 0L, false)
+}
 
 class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
 
@@ -45,11 +59,29 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         get() = prefs.getBoolean("tunnel_lane_alert_enabled", true)
         set(value) = prefs.edit().putBoolean("tunnel_lane_alert_enabled", value).apply()
 
+    var inCallAlertMode: InCallAlertMode
+        get() {
+            val modeStr = prefs.getString("in_call_alert_mode", InCallAlertMode.MUTE_VISUAL.name)
+            return try {
+                InCallAlertMode.valueOf(modeStr ?: InCallAlertMode.MUTE_VISUAL.name)
+            } catch (_: Exception) {
+                InCallAlertMode.MUTE_VISUAL
+            }
+        }
+        set(value) = prefs.edit().putString("in_call_alert_mode", value.name).apply()
+
+    var onVisualAlertCallback: ((isUrgent: Boolean) -> Unit)? = null
+    private var lastProximityBeepTimeMs: Long = 0L
+
     // 紀錄已播報過的階段 (1=遠距初報, 2=近距提醒)
     private val announcedEventStages = ConcurrentHashMap<String, Int>()
     private val cameraAlertTracker = CameraAlertTracker()
     private var announcedTunnelDirection: String? = null
     private var lastOverspeedBeepTime = 0L
+
+    private val toneThread = HandlerThread("RoadGuardToneThread").apply { start() }
+    private val toneHandler = Handler(toneThread.looper)
+    private var toneGenerator: ToneGenerator? = null
 
     private val audioFocusRequest: AudioFocusRequest = AudioFocusRequest.Builder(
         AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
@@ -89,6 +121,15 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
+    fun isInCall(): Boolean {
+        return try {
+            val mode = audioManager.mode
+            mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun requestDuckingFocus() {
         try {
             audioManager.requestAudioFocus(audioFocusRequest)
@@ -103,9 +144,52 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
+    fun getProximityStage(distanceMeters: Double, isOverspeed: Boolean): ProximityBeepStage {
+        return when {
+            distanceMeters > 150.0 -> ProximityBeepStage.NONE
+            distanceMeters > 100.0 -> ProximityBeepStage.STAGE_FAR
+            distanceMeters > 50.0 -> ProximityBeepStage.STAGE_MID
+            isOverspeed -> ProximityBeepStage.STAGE_NEAR_OVERSPEED
+            else -> ProximityBeepStage.STAGE_NEAR
+        }
+    }
+
+    fun checkAndPlayProximityBeep(distanceMeters: Double, isOverspeed: Boolean, now: Long = System.currentTimeMillis()) {
+        if (!isVoiceEnabled) return
+        val stage = getProximityStage(distanceMeters, isOverspeed)
+        if (stage == ProximityBeepStage.NONE) return
+
+        if (isInCall() && inCallAlertMode == InCallAlertMode.MUTE_VISUAL) {
+            onVisualAlertCallback?.invoke(isOverspeed)
+            return
+        }
+
+        if (now - lastProximityBeepTimeMs >= stage.intervalMs) {
+            lastProximityBeepTimeMs = now
+            if (stage.isDoubleTone) {
+                playToneSequence(intArrayOf(ToneGenerator.TONE_PROP_ACK, ToneGenerator.TONE_PROP_BEEP2), 80)
+            } else {
+                playSingleTone(ToneGenerator.TONE_PROP_BEEP, 70)
+            }
+        }
+    }
+
     fun speakNow(text: String, urgentTone: Boolean = false, flushQueue: Boolean = false) {
         if (!isVoiceEnabled) return
-        requestDuckingFocus()
+
+        if (isInCall()) {
+            when (inCallAlertMode) {
+                InCallAlertMode.MUTE_VISUAL -> {
+                    onVisualAlertCallback?.invoke(urgentTone)
+                    return
+                }
+                InCallAlertMode.DUCKING -> requestDuckingFocus()
+                InCallAlertMode.NORMAL -> {}
+            }
+        } else {
+            requestDuckingFocus()
+        }
+
         if (urgentTone) {
             playToneSequence(intArrayOf(ToneGenerator.TONE_PROP_ACK, ToneGenerator.TONE_PROP_BEEP2), 140)
         } else {
@@ -250,6 +334,7 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
      * 雪山隧道進洞前車道建議播報 (內側 vs 外側即時車速與推薦)
      */
     fun announceHsuehshanTunnel(advice: tw.roadguard.aegis.model.HsuehshanAdvice, force: Boolean = false) {
+        if (!advice.hasLaneRecommendation) return
         if (!isVoiceEnabled) return
         if (!force && !isTunnelLaneAlertEnabled) return
 
@@ -281,6 +366,7 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
     }
 
     fun checkAndAnnounceHsuehshanTunnel(advice: tw.roadguard.aegis.model.HsuehshanAdvice) {
+        if (!advice.hasLaneRecommendation) return
         if (!isVoiceEnabled || !isTunnelLaneAlertEnabled) return
         if (!advice.isApproachingEntrance) return
 
@@ -301,35 +387,57 @@ class VoiceAlertEngine(context: Context) : TextToSpeech.OnInitListener {
         cameraAlertTracker.clear()
         announcedEventStages.clear()
         resetTunnelAnnounced()
+        lastProximityBeepTimeMs = 0L
+    }
+
+    private fun getOrCreateToneGenerator(): ToneGenerator? {
+        if (toneGenerator == null) {
+            toneGenerator = try {
+                ToneGenerator(AudioManager.STREAM_MUSIC, 92)
+            } catch (_: Throwable) {
+                null
+            }
+        }
+        return toneGenerator
     }
 
     private fun playSingleTone(toneType: Int, durationMs: Int) {
-        Thread {
+        toneHandler.post {
             try {
-                val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 90)
-                tg.startTone(toneType, durationMs)
-                Thread.sleep(durationMs + 50L)
-                tg.release()
-            } catch (_: Exception) {
+                getOrCreateToneGenerator()?.startTone(toneType, durationMs)
+            } catch (_: Throwable) {
             }
-        }.start()
+        }
     }
 
     private fun playToneSequence(tones: IntArray, eachDurationMs: Int) {
-        Thread {
-            try {
-                val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 95)
-                for (t in tones) {
-                    tg.startTone(t, eachDurationMs)
-                    Thread.sleep(eachDurationMs + 90L)
+        tones.forEachIndexed { index, tone ->
+            val delayMs = index * (eachDurationMs + 90L)
+            toneHandler.postDelayed({
+                try {
+                    getOrCreateToneGenerator()?.startTone(tone, eachDurationMs)
+                } catch (_: Throwable) {
                 }
-                tg.release()
-            } catch (_: Exception) {
-            }
-        }.start()
+            }, delayMs)
+        }
     }
 
     fun shutdown() {
+        try {
+            toneHandler.removeCallbacksAndMessages(null)
+            toneHandler.post {
+                try {
+                    toneGenerator?.release()
+                    toneGenerator = null
+                } catch (_: Throwable) {
+                }
+                try {
+                    toneThread.quitSafely()
+                } catch (_: Throwable) {
+                }
+            }
+        } catch (_: Throwable) {
+        }
         try {
             tts?.stop()
             tts?.shutdown()

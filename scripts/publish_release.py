@@ -1,146 +1,85 @@
-import os
-import sys
-import subprocess
-import shutil
+"""Build and publish a signed RoadGuard APK from a committed main branch."""
+import argparse
+import hashlib
 import json
+import os
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
-# 強制標準輸出為 UTF-8
-if sys.stdout.encoding != 'utf-8':
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+from bump_version import PROPS_FILE, JSON_FILE, read_properties, write_properties
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[1]
+REPO = "jeff2428/Driving-Copilot"
+RELEASE_NOTES = """1. 👑 全面開放 Pro 尊享狀態：免看廣告直接同步雲端最新圖資，並享有背景自動更新特權。
+2. 🛸 科技座艙玻璃擬態 UI 與懸浮膠囊升級：新增逼近/區間進度條、隧道慣性推估徽章、平滑呼吸閃爍動畫與懸浮一鍵靜音切換，並提升地圖與音效效能。
+3. 🚇 隧道盲區高精度慣性推估 (Dead Reckoning)：長隧道/衛星盲區自動以進洞車速推算每秒里程、安全剩餘秒數與均速，900秒安全超時保護，出洞無縫切換。
+4. 💾 區間測速磁碟持久化與重啟復原 (Crash Recovery)：起點時間、已跑里程、均速即時持久化，抵禦系統被殺或重啟，重啟即可100%精準接續。
+5. 🚨 超速搶佔最高優先級多重事件智慧仲裁 (Speeding-First Arbitration)：超速時強制覆蓋一般路況，未超速多重路況智慧融合為單句語音，拒絕疲勞轟炸。
+6. 📞 通話語音焦點智慧管理 (Audio Focus) 與漸近逼近音：支援通話中強制降低音量(Ducking)或語音靜音＋懸浮窗微光呼吸閃爍雙模式；150m/100m/50m分段逼近音階。"""
 
-def read_current_version():
-    props_file = BASE_DIR / "version.properties"
-    vcode = "1"
-    vname = "2.0.0"
-    if props_file.exists():
-        for line in props_file.read_text(encoding="utf-8").splitlines():
-            if "=" in line:
-                k, v = line.split("=", 1)
-                if k.strip() == "VERSION_CODE":
-                    vcode = v.strip()
-                elif k.strip() == "VERSION_NAME":
-                    vname = v.strip()
-    return vcode, vname
 
-def run():
-    print("=" * 65)
-    print("🚗 神盾路況行車助手 — 一鍵自動遞增版本號、編譯並推送雲端更新")
-    print("=" * 65)
-    
-    # 1. 遞增版本號
-    print("\n[步驟 1/4] 正在自動遞增版本號並同步雲端更新檔 (cloud_data/app_version.json)...")
-    bump_script = BASE_DIR / "scripts" / "bump_version.py"
-    res = subprocess.run([sys.executable, str(bump_script)], cwd=str(BASE_DIR))
-    if res.returncode != 0:
-        print("\n❌ [錯誤] 版本號累加失敗！")
-        return False
-        
-    vcode, vname = read_current_version()
+def run(*args: str) -> None:
+    subprocess.run(args, cwd=ROOT, check=True)
 
-    # 2. 設定環境變數並編譯 Gradle
-    print(f"\n[步驟 2/4] 正在執行 Gradle 編譯打包新版 APK (v{vname}, Code: {vcode})，請稍候...")
-    java_home = r"C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot"
-    gradle_bat = Path(os.environ["USERPROFILE"]) / ".gradle" / "wrapper" / "dists" / "gradle-8.14.3-bin" / "cv11ve7ro1n3o1j4so8xd9n66" / "gradle-8.14.3" / "bin" / "gradle.bat"
-    
-    env = os.environ.copy()
-    env["JAVA_HOME"] = java_home
-    
-    gradle_cmd = [str(gradle_bat), "assembleDebug", "--console=plain"]
-    res = subprocess.run(gradle_cmd, cwd=str(BASE_DIR), env=env)
-    if res.returncode != 0:
-        print("\n❌ [錯誤] Gradle 編譯失敗，請檢查上方編譯錯誤日誌！")
-        return False
-        
-    # 3. 複製產出 APK
-    print("\n[步驟 3/4] 正在同步輸出 APK 安裝包至本機...")
-    src_apk = BASE_DIR / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
-    if not src_apk.exists():
-        print(f"\n❌ [錯誤] 找不到編譯產出檔：{src_apk}")
-        return False
-        
-    dst1 = BASE_DIR / "TW-RoadGuard-Aegis.apk"
-    dst2 = BASE_DIR / "神盾路況行車助手-v1.0.apk"
-    
-    shutil.copy2(src_apk, dst1)
-    shutil.copy2(src_apk, dst2)
-    
-    apk_size_mb = src_apk.stat().st_size / (1024 * 1024)
-    print(f"✅ 本機安裝包已就緒：{dst1.name} ({apk_size_mb:.2f} MB)")
 
-    # 4. 自動提交並推送到 GitHub 雲端 (觸發所有車主手機更新)
-    print(f"\n[步驟 4/4] 正在將新版發布至 GitHub 雲端倉庫 (jeff2428/Driving-Copilot)...")
+def output(*args: str) -> str:
+    return subprocess.check_output(args, cwd=ROOT, text=True, encoding="utf-8").strip()
+
+
+def publish() -> None:
+    if output("git", "branch", "--show-current") != "main" or output("git", "status", "--porcelain"):
+        raise ValueError("請先在 main 分支提交並檢查所有預定發布的變更")
+    run("git", "fetch", "origin", "main")
+    if output("git", "rev-list", "--count", "HEAD..origin/main") != "0":
+        raise ValueError("請先同步 origin/main 並重新驗證")
+    wrapper = ["cmd", "/c", "gradlew.bat"] if os.name == "nt" else ["sh", "./gradlew"]
+    run(*(["cmd", "/c", "make.bat", "check"] if os.name == "nt" else ["make", "check"]))
+    props = read_properties(PROPS_FILE)
+    manifest = json.loads(JSON_FILE.read_text(encoding="utf-8"))
+    old_props = PROPS_FILE.read_bytes()
+    # A version-only commit records a pending publication and lets the same tag resume.
+    pending = output("git", "log", "-1", "--format=%s") == f"Prepare Android v{props['VERSION_NAME']}"
+    if not pending:
+        parts = props["VERSION_NAME"].split(".")
+        parts[-1] = str(int(parts[-1]) + 1)
+        props.update(VERSION_NAME=".".join(parts), VERSION_CODE=str(int(props["VERSION_CODE"]) + 1))
+        write_properties(PROPS_FILE, props)
+    tag = "v" + props["VERSION_NAME"]
+    notes = f"版本 {tag} 更新：\n{RELEASE_NOTES}"
     try:
-        # git add & commit
-        subprocess.run(["git", "add", "-A"], cwd=str(BASE_DIR), check=True)
-        commit_msg = f"發布新版本 v{vname} (Code: {vcode})"
-        subprocess.run(["git", "commit", "-m", commit_msg], cwd=str(BASE_DIR), check=False)
-        
-        # git pull --rebase & push
-        print("  ➔ 正在同步並推送版本推播檔至 GitHub main 分支...")
-        subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=str(BASE_DIR))
-        push_res = subprocess.run(["git", "push", "-u", "origin", "main"], cwd=str(BASE_DIR))
-        if push_res.returncode == 0:
-            print("  ✅ 雲端版本資訊 (app_version.json) 已成功推送到 GitHub！")
+        run(*wrapper, ":app:assembleRelease")
+    except BaseException:
+        if not pending:
+            PROPS_FILE.write_bytes(old_props)
+        raise
+    if not pending:
+        run("git", "commit", "--only", "-m", "Prepare Android " + tag, "--", "version.properties")
+    head = output("git", "rev-parse", "HEAD")
+    run("git", "push", "origin", head + ":refs/tags/" + tag)
+    with tempfile.TemporaryDirectory() as tmp:
+        asset = Path(tmp) / "TW-RoadGuard-Aegis.apk"
+        remote = subprocess.run(["gh", "release", "view", tag, "--repo", REPO], cwd=ROOT, capture_output=True)
+        if remote.returncode == 0:
+            run("gh", "release", "download", tag, "--repo", REPO, "--pattern", asset.name, "--dir", tmp)
         else:
-            print("  ⚠️ git push 未完成，請檢查網路連線")
-            
-        # gh release upload APK and IPA
-        print(f"  ➔ 正在建立 GitHub Release (v{vname}) 並上傳安裝包...")
-        files_to_upload = [str(dst1)]
-        ipa_file = BASE_DIR / "RoadGuard-Aegis.ipa"
-        if ipa_file.exists():
-            files_to_upload.append(str(ipa_file))
+            shutil.copyfile(ROOT / "app/build/outputs/apk/release/app-release.apk", asset)
+            run("gh", "release", "create", tag, str(asset), "--repo", REPO, "--verify-tag", "--title", tag, "--notes", notes)
+        manifest.update(versionCode=int(props["VERSION_CODE"]), versionName=props["VERSION_NAME"],
+                        apkSha256=hashlib.sha256(asset.read_bytes()).hexdigest(),
+                        apkDownloadUrl=f"https://github.com/{REPO}/releases/download/{tag}/{asset.name}",
+                        releaseNotes=notes)
+    JSON_FILE.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    run("git", "commit", "--only", "-m", "Publish Android " + tag, "--", "cloud_data/app_version.json")
+    run("git", "push", "origin", "HEAD:main")
 
-        release_cmd = [
-            "gh", "release", "create", f"v{vname}",
-            *files_to_upload,
-            "--title", f"神盾路況行車助手 v{vname}",
-            "--notes", (
-                f"""神盾路況行車助手 v{vname} 最新版發布：
-- 🧭 懸浮視窗智慧精簡動態調整：
-  • 平時巡航無提醒時自動切換為極簡垂直時速膠囊（寬度僅約76dp），只顯示時速與km/h，零遮擋Google Maps地圖與轉彎指示
-  • 前方出現測速照相、區間測速或道路施工封閉時智慧動態展開完整警示，通過後自動無縫縮回
-- 🎯 科技執法細分項目智慧辨識與專屬語音：
-  • 自動識別闖紅燈、未禮讓行人、違規轉彎、佔用專用道、跨越雙白線等取締重點
-  • 語音明確提醒具體執法項目，無速限規定時自動抑制超速警示
-- ⏱️ 區間測速完整生命週期引擎：
-  • 導入起點預警、區間歷程真實均速累計計算、安全通行秒數即時倒數
-  • 均速超速即時語音警告、終點通過均速結算，浮窗同步呈現即時均速
-- 📐 法向量通過門閥 (Vector Pass Gate)：
-  • 引入車身沿行進方向投影積與實體逼近門檻
-  • 徹底解決山路急彎（如北宜公路 33K）轉向夾角 >72° 提前誤鳴「叮咚通過」之痛點
-- 🌉 高架與平面快速道路智慧立體分流：
-  • 涵蓋全台快速道路 (台61~88) 與都會高架 (市民大道、建國、新生、環快等)
-  • 高架 60~80 km/h 巡航時智慧排除橋下平面測速，平面慢行時排除高架測速
-- 🎙️ 多重警報智慧仲裁與語音融合 (Alert Fusion)：
-  • 前方同時出現測速與施工封閉時，自動融合成單一精煉句型播報，避免連續轟炸
-- 🍎 iOS 雙平台 100% 同步：
-  • Swift 與 Kotlin 核心幾何演算法完全對齊，通過全數單元與語法檢驗"""
-            )
-        ]
-        rel_res = subprocess.run(release_cmd, cwd=str(BASE_DIR))
-        if rel_res.returncode == 0:
-            print(f"  ✅ GitHub Release (v{vname}) 與 APK 下載載點已建立成功！")
-        else:
-            print("  ⚠️ GitHub Release 上傳略過或需稍後重試")
-
-    except Exception as e:
-        print(f"  ⚠️ 雲端推送步驟提示：{e}")
-
-    print("\n" + "=" * 65)
-    print(f"🎉 新版本 v{vname} (Code: {vcode}) 發布流程已全部完成！")
-    print(f"📦 Android 安裝包：{dst1.name}")
-    print(f"🍎 iOS 雲端打包：https://github.com/jeff2428/Driving-Copilot/actions/workflows/build_ios.yml")
-    print(f"🌐 雲端版本檔：https://raw.githubusercontent.com/jeff2428/Driving-Copilot/main/cloud_data/app_version.json")
-    print(f"📥 Android 下載點：https://github.com/jeff2428/Driving-Copilot/releases/latest/download/TW-RoadGuard-Aegis.apk")
-    print(f"📥 iOS IPA 下載點：https://github.com/jeff2428/Driving-Copilot/releases/latest/download/RoadGuard-Aegis.ipa")
-    print("💡 所有已安裝舊版的車主，開啟 App 將會立即跳出「發現新版本」全螢幕更新提醒！")
-    print("=" * 65)
-    return True
 
 if __name__ == "__main__":
-    success = run()
-    sys.exit(0 if success else 1)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    if args.dry_run:
+        print("make check → 正式版建置 → 版本標籤 → 上傳 APK → 發布校驗碼與版本檔")
+    else:
+        publish()

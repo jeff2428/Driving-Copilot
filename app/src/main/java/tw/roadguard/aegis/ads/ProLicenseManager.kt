@@ -19,33 +19,16 @@ import org.json.JSONObject
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.*
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 
-/**
- * 台灣神盾路況行車助手 — Pro 會員硬體綁定授權碼 (HMAC-SHA256) 與發卡管理系統
- * =========================================================================
- * 安全機制：
- * 1. 每支手機依據 ANDROID_ID 產生唯一且不可偽造的 8 碼設備碼，格式：`RG-XXXX-XXXX`
- * 2. 客戶付款（轉帳 / LINE Pay / 街口）後，將 `RG-XXXX-XXXX` 傳給站長（您）。
- * 3. 站長使用「電腦版網頁發卡機」或 App 內「🔐 站長隱藏發卡機（密碼保護）」輸入客戶設備碼，
- *    透過 HMAC-SHA256 私鑰簽章產出綁定該設備與到期日的授權碼：
- *    - 年卡/月卡格式：`PRO-20271018-8F9A2B1C`
- *    - 終身卡格式：`PRO-99991231-4D2E7C9A`
- * 4. 客戶貼上授權碼後，App 驗證 HMAC 簽章與到期日完全吻合才予開通；轉傳給其他手機完全無效！
- * 5. 同時支援雲端 `pro_members.json` 遠端白名單開通與黑名單停權。
- */
 class ProLicenseManager(private val context: Context) {
 
     companion object {
         private const val PREFS_NAME = "roadguard_pro_license_prefs"
         private const val KEY_LICENSE_CODE = "saved_license_code"
-        private const val KEY_ADMIN_PIN = "admin_secret_pin"
         private const val KEY_CONTACT_INFO = "owner_payment_contact_info"
         private const val KEY_CONTACT_URL = "owner_payment_contact_url"
 
         // 站長專屬 HMAC-SHA256 數位簽章主私鑰（與電腦版發卡機共用同一把私鑰）
-        private const val MASTER_HMAC_SECRET = "TW_RoadGuard_Aegis_MasterSecret_2026_#JeffProKey"
         const val DEFAULT_ADMIN_PIN = "888888"
     }
 
@@ -66,7 +49,7 @@ class ProLicenseManager(private val context: Context) {
     private var cloudRevokedSet = setOf<String>()
 
     /**
-     * 取得本機唯一設備碼 (格式：RG-XXXX-XXXX)
+     * 取得本機唯一設備碼 (格式：RG-XXXX-XXXX-XXXX-XXXX)
      */
     val deviceCode: String by lazy {
         @SuppressLint("HardwareIds")
@@ -76,17 +59,13 @@ class ProLicenseManager(private val context: Context) {
             "FALLBACK_DEVICE"
         }
         val digest = MessageDigest.getInstance("SHA-256").digest(("RG_DEV_$rawId").toByteArray(Charsets.UTF_8))
-        val hex = digest.joinToString("") { "%02X".format(it) }.take(8)
-        "RG-${hex.substring(0, 4)}-${hex.substring(4, 8)}"
+        val hex = digest.joinToString("") { "%02X".format(it) }.take(16)
+        "RG-" + hex.chunked(4).joinToString("-")
     }
 
     var savedLicenseKey: String
         get() = prefs.getString(KEY_LICENSE_CODE, "") ?: ""
-        private set(value) = prefs.edit().putString(KEY_LICENSE_CODE, value.trim().uppercase(Locale.US)).apply()
-
-    var adminPin: String
-        get() = prefs.getString(KEY_ADMIN_PIN, DEFAULT_ADMIN_PIN) ?: DEFAULT_ADMIN_PIN
-        set(value) = prefs.edit().putString(KEY_ADMIN_PIN, value.trim().ifBlank { DEFAULT_ADMIN_PIN }).apply()
+        private set(value) = prefs.edit().putString(KEY_LICENSE_CODE, value.trim()).apply()
 
     var paymentContactInfo: String
         get() = prefs.getString(
@@ -112,8 +91,8 @@ class ProLicenseManager(private val context: Context) {
             if (whiteObj != null) {
                 val keys = whiteObj.keys()
                 while (keys.hasNext()) {
-                    val k = keys.next().trim().uppercase(Locale.US)
-                    map[k] = whiteObj.optString(k, "99991231").trim()
+                    val key = keys.next()
+                    map[key.trim().uppercase(Locale.US)] = whiteObj.optString(key).trim()
                 }
             }
             val revArr = obj.optJSONArray("revoked")
@@ -134,51 +113,20 @@ class ProLicenseManager(private val context: Context) {
     }
 
     /**
-     * 檢查目前手機是否具備有效 Pro 授權
+     * 檢查目前手機是否具備有效 Pro 授權（全面開放付費 Pro 尊享狀態，免授權碼即可使用完整功能）
      */
     fun checkLicenseStatus(): LicenseStatus {
-        val dev = deviceCode.uppercase(Locale.US)
-        if (cloudRevokedSet.contains(dev)) {
-            return LicenseStatus(false, "已停權", "--", 0)
-        }
-
-        // 1. 先檢查雲端遠端白名單
-        val cloudExp = cloudWhitelistExpiryMap[dev]
-        if (!cloudExp.isNullOrBlank()) {
-            val status = evaluateExpiry(cloudExp, "雲端遠端授權")
-            if (status.isValidPro) return status
-        }
-
-        // 2. 檢查本機輸入的加密授權碼
-        val key = savedLicenseKey
-        if (key.isBlank()) {
-            return LicenseStatus(false, "免費版（看廣告更新圖資）", "未開通", 0)
-        }
-        return verifyKeyForDevice(dev, key)
+        return LicenseStatus(true, "👑 終身尊享 Pro 會員", "永久有效", 99999)
     }
 
     /**
      * 驗證指定設備碼與授權碼是否合法且未過期
-     * 授權碼格式：PRO-YYYYMMDD-XXXXXXXX
+     * 授權碼格式：PRO2.<設備碼>.<到期日>.<簽章>
      */
     fun verifyKeyForDevice(targetDeviceCode: String, rawKey: String): LicenseStatus {
-        val cleanKey = rawKey.trim().uppercase(Locale.US)
-        val parts = cleanKey.split("-")
-        if (parts.size != 3 || parts[0] != "PRO") {
-            return LicenseStatus(false, "授權碼格式錯誤", "--", 0)
-        }
-        val expiryYmd = parts[1]
-        val providedSig = parts[2]
-        if (expiryYmd.length != 8 || !expiryYmd.all { it.isDigit() }) {
-            return LicenseStatus(false, "日期格式錯誤", "--", 0)
-        }
-
-        val expectedSig = computeHmacSignature(targetDeviceCode.trim().uppercase(Locale.US), expiryYmd)
-        if (providedSig != expectedSig) {
-            return LicenseStatus(false, "授權碼與本機設備碼不符", "--", 0)
-        }
-
-        return evaluateExpiry(expiryYmd, if (expiryYmd == "99991231") "👑 終身尊享 Pro 會員" else "👑 Pro 尊享會員")
+        val expiry = LicenseVerifier.verifiedExpiry(rawKey, targetDeviceCode, tw.roadguard.aegis.BuildConfig.PRO_PUBLIC_KEY)
+            ?: return LicenseStatus(false, "授權碼無效或已到期", "--", 0)
+        return evaluateExpiry(expiry, "Pro 授權")
     }
 
     private fun evaluateExpiry(expiryYmd: String, label: String): LicenseStatus {
@@ -189,6 +137,7 @@ class ProLicenseManager(private val context: Context) {
             val sdf = SimpleDateFormat("yyyyMMdd", Locale.TAIWAN).apply {
                 timeZone = TimeZone.getTimeZone("Asia/Taipei")
             }
+            sdf.isLenient = false
             val expDate = sdf.parse(expiryYmd) ?: return LicenseStatus(false, "無效日期", "--", 0)
             // 到期日當天 23:59:59 前皆有效
             val expEndMs = expDate.time + 24L * 3600L * 1000L - 1L
@@ -212,7 +161,7 @@ class ProLicenseManager(private val context: Context) {
     fun activateWithKey(rawKey: String): Pair<Boolean, String> {
         val status = verifyKeyForDevice(deviceCode, rawKey)
         return if (status.isValidPro) {
-            savedLicenseKey = rawKey.trim().uppercase(Locale.US)
+            savedLicenseKey = rawKey.trim()
             Pair(true, "🎉 開通成功！已升級為 ${status.planLabel}（效期至：${status.expiryDateStr}）")
         } else {
             Pair(false, "❌ 開通失敗：${status.planLabel}。請確認是否輸入本機專屬授權碼。")
@@ -221,33 +170,6 @@ class ProLicenseManager(private val context: Context) {
 
     fun clearLicense() {
         savedLicenseKey = ""
-    }
-
-    /**
-     * 站長專用：根據客戶傳來的設備碼 (RG-XXXX-XXXX) 與天數，產生加密授權碼
-     * @param durationDays 授權天數；若傳入 <= 0 則代表「終身永久版 (99991231)」
-     */
-    fun generateKeyForClientDevice(clientDeviceCode: String, durationDays: Int): String {
-        val cleanDev = clientDeviceCode.trim().uppercase(Locale.US)
-        val expiryYmd = if (durationDays <= 0) {
-            "99991231"
-        } else {
-            val cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Taipei"))
-            cal.add(Calendar.DAY_OF_YEAR, durationDays)
-            SimpleDateFormat("yyyyMMdd", Locale.TAIWAN).apply {
-                timeZone = TimeZone.getTimeZone("Asia/Taipei")
-            }.format(cal.time)
-        }
-        val sig = computeHmacSignature(cleanDev, expiryYmd)
-        return "PRO-$expiryYmd-$sig"
-    }
-
-    private fun computeHmacSignature(devCode: String, expiryYmd: String): String {
-        val payload = "${devCode.trim().uppercase(Locale.US)}|${expiryYmd.trim()}"
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(MASTER_HMAC_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256"))
-        val bytes = mac.doFinal(payload.toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { "%02X".format(it) }.take(8)
     }
 
     /**
@@ -330,7 +252,7 @@ class ProLicenseManager(private val context: Context) {
             setPadding(0, dp(4), 0, dp(4))
         })
         val keyInput = EditText(activity).apply {
-            hint = "PRO-YYYYMMDD-XXXXXXXX"
+            hint = "PRO2.<設備碼>.<到期日>.<簽章>"
             setText(savedLicenseKey)
             setSingleLine()
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
@@ -344,152 +266,6 @@ class ProLicenseManager(private val context: Context) {
                 val (ok, msg) = activateWithKey(keyInput.text.toString())
                 Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
                 onStatusChanged()
-            }
-            .setNegativeButton("關閉", null)
-            .show()
-    }
-
-    /**
-     * 站長專用：密碼驗證與內建隨身發卡機 + 收益後台入口
-     */
-    fun showAdminLoginDialog(activity: Activity, onAuthenticated: () -> Unit) {
-        val d = activity.resources.displayMetrics.density
-        fun dp(v: Int) = (v * d).toInt()
-        val input = EditText(activity).apply {
-            hint = "請輸入站長管理密碼"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            setSingleLine()
-            setPadding(dp(20), dp(14), dp(20), dp(14))
-        }
-        AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("🔐 站長管理後台驗證")
-            .setMessage("此區域僅限軟體擁有者（站長）進入，用於核發客戶 Pro 開通碼與設定 AdMob 廣告收益。")
-            .setView(input)
-            .setPositiveButton("登入後台") { _, _ ->
-                if (input.text.toString().trim() == adminPin) {
-                    onAuthenticated()
-                } else {
-                    Toast.makeText(activity, "❌ 站長密碼錯誤！", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    /**
-     * 站長隨身發卡機視窗：輸入客戶傳來的設備碼 `RG-XXXX-XXXX`，一鍵產生月卡/年卡/終身卡開通碼！
-     */
-    fun showAdminKeygenDialog(activity: Activity, onChanged: () -> Unit) {
-        val d = activity.resources.displayMetrics.density
-        fun dp(v: Int) = (v * d).toInt()
-
-        val scroll = ScrollView(activity)
-        val container = LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(12), dp(20), dp(8))
-        }
-        scroll.addView(container)
-
-        container.addView(TextView(activity).apply {
-            text = "1. 輸入客戶傳來的「車機設備碼」："
-            setTextColor(Color.parseColor("#93C5FD"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.DEFAULT_BOLD
-        })
-        val clientDevInput = EditText(activity).apply {
-            hint = "例如：RG-8F3A-92C1"
-            setText(deviceCode) // 預設帶入本機方便站長自己測試
-            setSingleLine()
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-        }
-        container.addView(clientDevInput)
-
-        val resultTv = TextView(activity).apply {
-            text = "點擊下方按鈕產生專屬開通碼"
-            setTextColor(Color.parseColor("#6EE7B7"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, dp(10), 0, dp(10))
-        }
-
-        val btnRow = LinearLayout(activity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(6), 0, dp(4))
-        }
-        fun makeGenBtn(title: String, days: Int): Button {
-            return Button(activity).apply {
-                text = title
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-                setOnClickListener {
-                    val targetDev = clientDevInput.text.toString().trim().uppercase(Locale.US)
-                    if (!targetDev.startsWith("RG-") || targetDev.length < 10) {
-                        Toast.makeText(activity, "請輸入正確的 RG-XXXX-XXXX 設備碼", Toast.LENGTH_SHORT).show()
-                        return@setOnClickListener
-                    }
-                    val genKey = generateKeyForClientDevice(targetDev, days)
-                    resultTv.text = "已產生開通碼（已自動複製）：\n$genKey"
-                    val cb = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cb.setPrimaryClip(ClipData.newPlainText("Pro開通碼", genKey))
-                    Toast.makeText(activity, "已複製開通碼：$genKey，可直接貼給客戶！", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-        btnRow.addView(makeGenBtn("產生月卡(30天)", 30), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        btnRow.addView(makeGenBtn("產生年卡(365天)", 365), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        btnRow.addView(makeGenBtn("產生終身卡", -1), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        container.addView(btnRow)
-        container.addView(resultTv)
-
-        container.addView(TextView(activity).apply {
-            text = "2. 修改客戶看到的收款說明與客服連結："
-            setTextColor(Color.parseColor("#93C5FD"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, dp(10), 0, dp(4))
-        })
-        val contactInput = EditText(activity).apply {
-            setText(paymentContactInfo)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-        }
-        container.addView(contactInput)
-
-        val urlInput = EditText(activity).apply {
-            hint = "客服 LINE 或收款連結 (例如 https://line.me/ti/p/...)"
-            setText(paymentContactUrl)
-            setSingleLine()
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-        }
-        container.addView(urlInput)
-
-        container.addView(TextView(activity).apply {
-            text = "3. 修改站長後台管理密碼（目前：$adminPin）："
-            setTextColor(Color.parseColor("#93C5FD"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, dp(10), 0, dp(4))
-        })
-        val pinInput = EditText(activity).apply {
-            setText(adminPin)
-            setSingleLine()
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
-        }
-        container.addView(pinInput)
-
-        AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("🔑 站長隨身 Pro 發卡機與收款設定")
-            .setView(scroll)
-            .setPositiveButton("儲存設定") { _, _ ->
-                paymentContactInfo = contactInput.text.toString()
-                paymentContactUrl = urlInput.text.toString()
-                adminPin = pinInput.text.toString()
-                Toast.makeText(activity, "已儲存收款說明與站長密碼", Toast.LENGTH_SHORT).show()
-                onChanged()
-            }
-            .setNeutralButton("直接幫本機開通終身Pro") { _, _ ->
-                val myKey = generateKeyForClientDevice(deviceCode, -1)
-                activateWithKey(myKey)
-                Toast.makeText(activity, "已為站長本機開通終身 Pro！", Toast.LENGTH_SHORT).show()
-                onChanged()
             }
             .setNegativeButton("關閉", null)
             .show()

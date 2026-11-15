@@ -16,3 +16,11 @@ build/
 *.hprof
 *.orig
 *.apk
+*.pem
+*.jks
+*.keystore
+keystore.properties
+
+# Python bytecode
+__pycache__/
+*.py[cod]
