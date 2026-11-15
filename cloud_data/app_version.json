@@ -2,6 +2,7 @@
   "versionCode": 25,
   "versionName": "2.0.23",
   "forceUpdate": false,
-  "apkDownloadUrl": "https://github.com/jeff2428/Driving-Copilot/releases/latest/download/TW-RoadGuard-Aegis.apk",
-  "releaseNotes": "版本 v2.0.23 更新：\n1. 🚇 隧道盲區高精度慣性推估 (Dead Reckoning)：長隧道/衛星盲區自動以進洞車速推算每秒里程、安全剩餘秒數與均速，900秒安全超時保護，出洞無縫切換。\n2. 💾 區間測速磁碟持久化與重啟復原 (Crash Recovery)：起點時間、已跑里程、均速即時持久化，抵禦系統被殺或重啟，重啟即可100%精準接續。\n3. 🚨 超速搶佔最高優先級多重事件智慧仲裁 (Speeding-First Arbitration)：超速時強制覆蓋一般路況，未超速多重路況智慧融合為單句語音，拒絕疲勞轟炸。\n4. 📞 通話語音焦點智慧管理 (Audio Focus) 與漸近逼近音：支援通話中強制降低音量(Ducking)或語音靜音＋懸浮窗微光呼吸閃爍雙模式；150m/100m/50m分段逼近音階。\n5. 📜 雙平台商店上架法規檔案與顯著揭露：完整獨立HTML5隱私權政策與商店文案，顯著揭露背景定位與懸浮窗收集目的，宣告ACCESS_BACKGROUND_LOCATION合規權限。"
+  "apkDownloadUrl": "https://github.com/jeff2428/Driving-Copilot/releases/download/v2.0.23/TW-RoadGuard-Aegis.apk",
+  "releaseNotes": "版本 v2.0.23 更新：\n1. 👑 全面開放 Pro 尊享狀態：免看廣告直接同步雲端最新圖資，並享有背景自動更新特權。\n2. 🛸 科技座艙玻璃擬態 UI 與懸浮膠囊升級：新增逼近/區間進度條、隧道慣性推估徽章、平滑呼吸閃爍動畫與懸浮一鍵靜音切換，並提升地圖與音效效能。\n3. 🚇 隧道盲區高精度慣性推估 (Dead Reckoning)：長隧道/衛星盲區自動以進洞車速推算每秒里程、安全剩餘秒數與均速，900秒安全超時保護，出洞無縫切換。\n4. 💾 區間測速磁碟持久化與重啟復原 (Crash Recovery)：起點時間、已跑里程、均速即時持久化，抵禦系統被殺或重啟，重啟即可100%精準接續。\n5. 🚨 超速搶佔最高優先級多重事件智慧仲裁 (Speeding-First Arbitration)：超速時強制覆蓋一般路況，未超速多重路況智慧融合為單句語音，拒絕疲勞轟炸。\n6. 📞 通話語音焦點智慧管理 (Audio Focus) 與漸近逼近音：支援通話中強制降低音量(Ducking)或語音靜音＋懸浮窗微光呼吸閃爍雙模式；150m/100m/50m分段逼近音階。",
+  "apkSha256": "ec4c70a3cec18f6f25dea3e00438f565718b2f44c5fec5163cd70b1817244995"
 }
